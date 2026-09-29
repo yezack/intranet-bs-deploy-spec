@@ -1,0 +1,51 @@
+# 构建上下文裁剪 —— 内网 B/S 架构开发规范 v2.2 §3.1 / §4.4
+#
+# 为什么必须存在：构建上下文 = 交付包根目录，而根目录里会有
+#   <项目名>-app.tar（可达 GB 级）与 frontend/node_modules。
+# 不排除它们，每次 docker build 都要把整个包传给 daemon（§3.1 强制交付本文件）。
+#
+# 【强制】.env 及其变体绝不能进构建上下文（规范 S5）
+
+.env
+.env.*
+!.env.example
+
+# 离线镜像包与历史归档
+*.tar
+*.tar.gz
+*.tgz
+backups/
+
+# 本地 SQLite 数据库（DB_ENGINE=sqlite 时产生）—— 绝不进镜像：
+# 镜像里出现 .db 文件既撑大体积，也会让 sqlite 分支误以为有可用数据
+.local/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# 构建投入物（Dockerfile 只 COPY frontend/dist）
+frontend/node_modules
+frontend/src
+frontend/.vite
+frontend/.npmrc
+frontend/package.json
+frontend/package-lock.json
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+
+# 工程与文档
+.git/
+.gitignore
+.gitattributes
+.dockerignore
+.github/
+docs/
+deploy/
+tools/
+*.md
+.update.lock
+*.log

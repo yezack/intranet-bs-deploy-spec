@@ -1,0 +1,86 @@
+# <项目名> —— 内网 B/S 编排（单容器架构）
+# 依据：内网 B/S 架构开发规范 v2.2 §3.2 / §3.3 / §3.5 / §4
+#
+# 合规要点（逐条对应规范条款）：
+#   无 ports: 映射            → 对外只经统一网关 nginx-gateway（§4.1 强制）
+#   只接 gateway-network      → 单容器项目不需要项目内网，少一个网络对象（§3.3）
+#   不定义数据库服务           → 数据库由运维提供，项目只连接（§3.3）
+#   配置全部走 .env            → 无硬编码（§3.3 / S5）
+#   user: APP_UID             → 非 root 运行，与 init.sh chown 的映射目录属主一致（§3.4 / §4.5）
+#   healthcheck + read_only + tmpfs + cap_drop + 资源限额 + 日志轮转（§3.5 S1/S2/S4）
+#   TZ=Asia/Shanghai（§3.5 S6）
+#
+# 部署：docker compose up -d --force-recreate
+# 注意：Compose v2 已废弃 version: 字段，此处不写。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  app:
+    # 统一 latest tag，便于 update.sh 用固定脚本升级（规范 §3.2）
+    image: ${PROJECT_NAME}-app:latest
+    container_name: ${PROJECT_NAME}-app
+    restart: unless-stopped
+    init: true
+
+    # 容器运行身份：必须与 .env 的 APP_UID/APP_GID、以及 init.sh chown 的映射目录属主一致
+    # （规范 §3.4 / §4.5）。属主不一致时 uploads/、downloads/ 不可写。
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+
+    # .env 是唯一配置源；environment 只做兜底与固定项
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+
+    # 单容器项目只接统一网关网络：网关按容器名 ${PROJECT_NAME}-app 反代（§4.2）
+    networks:
+      - gateway-network
+
+    # 只映射三类目录：配置、上传、下载（规范 §3.2 强制）
+    volumes:
+      - ./conf:/app/conf:ro
+      - ./uploads:/data/uploads
+      - ./downloads:/data/downloads
+
+    logging: *default-logging
+
+    # 容器层不可写；持久化数据在共享数据库（S2）
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:80/api/v1/health', timeout=5).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # 最小权限；NET_BIND_SERVICE 供非 root 绑定 80
+    # 若改为 root 运行，可删除 user 与 cap_drop / cap_add（见规范 §3.5）
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+    # 资源限额：采用非 swarm 语义明确、不依赖 Compose 版本的写法（规范 §3.5）
+    # 验收：docker inspect --format '{{.HostConfig.Memory}}' ${PROJECT_NAME}-app → 536870912
+    # 注：若现场 compose 不认 cpus，可等价改用 cpu_quota: 100000（1 核）
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 256
+
+networks:
+  gateway-network:
+    external: true                 # 统一网关网络，由运维维护，禁止自行创建

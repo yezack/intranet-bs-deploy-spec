@@ -1,0 +1,58 @@
+# 版本库排除规则 —— 内网 B/S 架构开发规范 v2.2 §4.4 / S5
+#
+# 【强制】S5：敏感信息一律走 .env，.env 不得提交进版本库。
+# 本文件是强制交付物（§3.1），必须包含 .env 与 .local/ 两条规则。
+#
+# 【注意】.gitignore 不支持行尾注释 —— `pattern  # 说明` 会把整行当成模式，规则静默失效。
+# 本文件所有注释都单独成行。
+
+# ---------- 敏感配置 ----------
+.env
+.env.*
+!.env.example
+
+# ---------- 本地 SQLite 数据库 ----------
+# DB_ENGINE=sqlite 时产生（规范 §3.6）。本地数据不入库，删掉重跑即可。
+.local/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---------- 依赖与缓存 ----------
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+frontend/.vite/
+
+# ---------- 构建投入物（源码与产物都不必入库）----------
+frontend/src/
+frontend/package.json
+frontend/package-lock.json
+
+# ---------- 离线镜像包与归档 ----------
+*.tar
+*.tar.gz
+*.tgz
+backups/
+
+# ---------- 脚本运行时产物 ----------
+.update.lock
+*.log
+
+# ---------- 现场数据目录（由 init.sh 创建）----------
+uploads/
+downloads/
+
+# ---------- 编辑器与系统 ----------
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
