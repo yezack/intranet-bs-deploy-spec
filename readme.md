@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v2.2** |
+| 版本 | **v2.3** |
 | 生效日期 | 2026-09-29 |
 | 适用范围 | 在互联网侧开发、需无缝迁移至内网 Linux（x86_64）服务器运行的 B/S 系统 |
 | 目标场景 | 几人到几十人小团队；**多个项目共用一台服务器** |
@@ -13,12 +13,16 @@
 | 取代关系 | 取代《B/S 部署规范 v1.2》；v2.0 的章节结构已重构 |
 
 **关键词**：`<项目名>` 一律指小写字母、数字与连字符组成的项目代号（如 `myapp`），且必须与交付包目录名、容器名前缀、镜像名前缀保持一致。
+**`<APP_DOMAIN>`** 指本项目的对外访问域名（`.env` 的 `APP_DOMAIN`，由运维分配，**开发阶段确认**），如 `xz.sjq.sh`。
 
 ---
 
 ## 三分钟实施卡
 
 **给 AI 与开发者的第一入口**：把 [`templates/AGENTS.md`](templates/AGENTS.md) 放进项目根目录——一页红线，违反任一即返工。
+
+**第 0 步（开发启动前）：确认对外域名**
+向运维确认本项目的访问域名，填入 `.env.example` 的 `APP_DOMAIN`，并让 `deploy/gateway-site.conf` 的 `server_name` 与它**逐字一致**。未确认域名不得开工——交付前闸门会因此拒绝打包。
 
 **五步交付（构建机）**
 
@@ -39,13 +43,13 @@ bash tools/preflight.sh
 ```bash
 sudo mkdir -p /home/docker/<项目名>
 sudo tar xzf <项目名>-delivery.tar.gz -C /home/docker/<项目名>
-# .env：DB_ENGINE 保持 mariadb（sqlite 仅本地开发，见 §3.6）；DB_* 由运维下发；
-#       SECRET_KEY 可留空（init.sh 会自动生成并写回）
+# .env：APP_DOMAIN 已在开发阶段确认；DB_ENGINE 保持 mariadb（sqlite 仅本地开发，见 §3.6）；
+#       DB_* 由运维下发；SECRET_KEY 可留空（init.sh 会自动生成并写回）
 cd /home/docker/<项目名> && cp .env.example .env && vi .env && chmod 600 .env && chmod +x init.sh update.sh
 sudo ./init.sh
 ```
 
-之后请运维投放 `deploy/gateway-site.conf`（`nginx -t` + `nginx -s reload`），并确认内网 DNS 已解析 `<项目名>.lan`。
+之后请运维投放 `deploy/gateway-site.conf`（`nginx -t` + `nginx -s reload`）。单机验证可在**目标虚拟机自身**的 `/etc/hosts` 写 `<虚拟机 IP>  <APP_DOMAIN>`；多人使用则必须由运维在内网 DNS 加 A 记录。
 
 **验收：一条命令跑完 15 项**
 
@@ -54,7 +58,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 ```
 
 **十条红线（AI 最容易踩的）**：无 CDN/外链 · 无 `ports:` · 不自建数据库容器 · 基础镜像不用 `latest` · 部署期不装依赖 · 不硬编码口令 · 除 `/health` 外必须鉴权 · 必须实现 `/api/v1/health` · `mount_frontend()` 最后调用 · 交付说明不得与规范冲突。
-（完整 15 条见 [`templates/AGENTS.md`](templates/AGENTS.md)；15 项验收要点见 [§6.3](docs/06-交付与验收.md)。）
+（完整 16 条见 [`templates/AGENTS.md`](templates/AGENTS.md)；15 项验收要点见 [§6.3](docs/06-交付与验收.md)。）
 
 ---
 
@@ -62,7 +66,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 
 | 章节 | 文档 | 内容 |
 |---|---|---|
-| §1 | [适用范围、目标与技术边界](docs/01-适用范围与技术边界.md) | 适用边界、无缝迁移定义、内网离线约束、技术边界 |
+| §1 | [适用范围、目标与技术边界](docs/01-适用范围与技术边界.md) | 适用边界、无缝迁移定义、内网离线约束、技术边界、域名前置条件 |
 | §2 | [目标架构](docs/02-目标架构.md) | 部署拓扑、**基准环境（实测值）** |
 | §3 | **[强制条款](docs/03-强制条款.md)** | 交付物、镜像、编排、部署路径、安全与运行基线、数据库引擎开关 |
 | §4 | [端口、路径与网关接入](docs/04-端口路径与网关接入.md) | 端口分配、网关接入与防串站、交付包结构、容器内路径、API 路径、SPA 托管 |
@@ -75,7 +79,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 | 模板 | 用途 |
 |---|---|
 | `AGENTS.md`、`tools/preflight.sh`、`tools/verify.sh` | 一页红线、交付前闸门、现场验收（vibecoding 关键） |
-| `Dockerfile`、`docker-compose.yml`、`.env.example` | 单容器镜像与编排 |
+| `Dockerfile`、`docker-compose.yml`、`.env.example` | 单容器镜像与编排（`.env.example` 含 `APP_DOMAIN` / `DB_ENGINE`） |
 | `db.py` | 连接串唯一构造点（`DB_ENGINE` 开关：本地 sqlite / 内网共享库，§3.6） |
 | `.dockerignore`、`.gitattributes`、`.gitignore` | 构建上下文裁剪、锁定 LF 行尾、版本库排除 |
 | `init.sh`、`update.sh` | 首次部署与带自动回滚的升级 |
@@ -88,8 +92,9 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 
 | 版本 | 变化 |
 |---|---|
-| **v2.2** | 新增**数据库引擎开关** `DB_ENGINE`（`sqlite` 仅本地开发 / `mariadb`·`pgsql` 内网共享库），新增 [§3.6](docs/03-强制条款.md)；连接串收口到**唯一构造点** `backend/app/db.py`（含口令 URL 编码、`utf8mb4` 强制、`max_overflow: 0` 连接池硬上限、`pool_pre_ping`）；`init.sh` / `update.sh` / `tools/verify.sh` 三处拒绝 `DB_ENGINE=sqlite`（防"升级后数据静默丢失"）；新增 `.gitignore` 模板（含 `.env` 与 `.local/`）；`db.py`、`.gitignore` 登记进 §3.1 交付物与 §4.4 结构。 |
-| v2.1 | **章节重构**：原 §3「技术栈」并入 §1.1；原 §5+§6 合并为 §4；原 §4→§3、§7→§5、§8→§6，模板与脚本注释中的章节引用已全量重写。新增 `AGENTS.md`、`tools/preflight.sh`、`tools/verify.sh`、`.dockerignore`、`.gitattributes`；网关站点配置改为 `resolver` + 变量 `proxy_pass`（**禁用 `upstream`**，防单个项目拖垮全站）并补安全响应头；`update.sh` 改为**时间戳快照备份**（`.env` + `docker-compose.yml` + 镜像包 + `MANIFEST`）、回滚编排文件、清理被替换的旧镜像；资源限额改用 `mem_limit`/`cpus`/`pids_limit`；Dockerfile 显式安装 tzdata；`APP_UID`/`APP_GID` 统一映射目录属主；`.env` 值加字符集约束与 `DB_POOL_SIZE`；CRLF 自检清单收敛为唯一来源；新增 `§6.5 项目下线`；验收扩至 15 项并脚本化。 |
+| **v2.3** | **对外域名成为开发阶段的显式输入**：`.env.example` 新增 `APP_DOMAIN`（占位值 `CHANGE_ME_DOMAIN`）；`AGENTS.md` 新增红线第 16 条；`tools/preflight.sh` 新增 **8b** 校验（占位值 / 格式 / 与 `deploy/gateway-site.conf` 的 `server_name` 一致性，不一致即禁止交付）；`init.sh` 在预检阶段校验但**不询问**，`update.sh` 与 `tools/verify.sh` 改为从 `APP_DOMAIN` 派生；防串站验收改用 RFC 2606 保留域名 `no-such-host.invalid`；§4.3 增补「目标 VM `/etc/hosts` 单机模拟」指引。清掉了原先把 `<项目名>.lan` 写死在 17 处的硬编码——其中 `verify.sh` 的硬编码会让真实验收把正确的部署判为失败。 |
+| v2.2 | 新增**数据库引擎开关** `DB_ENGINE`（`sqlite` 仅本地开发 / `mariadb`·`pgsql` 内网共享库），新增 [§3.6](docs/03-强制条款.md)；连接串收口到**唯一构造点** `backend/app/db.py`；`init.sh` / `update.sh` / `tools/verify.sh` 三处拒绝 `DB_ENGINE=sqlite`；新增 `.gitignore` 模板。 |
+| v2.1 | **章节重构**：原 §3「技术栈」并入 §1.1；原 §5+§6 合并为 §4；原 §4→§3、§7→§5、§8→§6。新增 `AGENTS.md`、`tools/preflight.sh`、`tools/verify.sh`、`.dockerignore`、`.gitattributes`；网关站点配置改为 `resolver` + 变量 `proxy_pass`（**禁用 `upstream`**）并补安全响应头；`update.sh` 改为**时间戳快照备份**与编排回滚；资源限额改用 `mem_limit`/`cpus`/`pids_limit`；Dockerfile 显式安装 tzdata；`APP_UID`/`APP_GID` 统一映射目录属主；新增 `§6.5 项目下线`；验收扩至 15 项并脚本化。 |
 | v2.0 | 按原始需求 7 条重构为 §1–§8 章节结构，取代 v1.2。 |
 
 **章节对应（v2.0 → v2.1）**

@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 版本更新脚本（自动快照 → 导入 → 重建 → 校验 → 失败自动回滚并告警）
-# 依据：内网 B/S 架构开发规范 v2.2 §5.2
+# 依据：内网 B/S 架构开发规范 v2.3 §5.2
 #
 # 用法： sudo ./update.sh [选项]
 #   --tar <文件>        指定镜像包，默认取本目录下最新的 *.tar
@@ -314,7 +314,7 @@ cat <<EOF
 验收：
   ${DOCKER_SHOW} compose ps
   ${DOCKER_SHOW} inspect --format '{{.State.Health.Status}}' ${CONTAINER}
-  curl -s -H 'Host: ${PROJECT_NAME}.lan' http://127.0.0.1/api/v1/health
+  curl -s -H 'Host: ${APP_DOMAIN:-<APP_DOMAIN>}' http://127.0.0.1/api/v1/health
 
 如需回滚到更新前版本：
   ${DOCKER_SHOW} load -i ${ROLLBACK_IMG:-<快照中的镜像包>}

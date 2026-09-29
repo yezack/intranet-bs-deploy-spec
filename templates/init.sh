@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.2 §5.1
+# 依据：内网 B/S 架构开发规范 v2.3 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -161,6 +161,21 @@ if [ "$secret_needs_fix" = 1 ]; then
     fi
 fi
 
+# ---------- 对外域名（开发阶段确认，部署侧只校验）----------
+# 域名由运维分配、在项目开发阶段写入 .env.example；这里只拦「没确认」和「格式不对」。
+APP_DOMAIN="${APP_DOMAIN:-}"
+[ -n "$APP_DOMAIN" ] || die ".env 中缺少 APP_DOMAIN（对外域名）。它应在开发阶段向运维确认后填入，例：APP_DOMAIN=xz.sjq.sh"
+case "$APP_DOMAIN" in
+    *CHANGE_ME*) die "APP_DOMAIN 仍是占位值（$APP_DOMAIN）。请向运维确认本项目对外域名后再部署" ;;
+    *://*|*/*)   die "APP_DOMAIN 格式不合法（$APP_DOMAIN）：只写域名本身，不要带 http:// 或路径" ;;
+    *:*)         die "APP_DOMAIN 格式不合法（$APP_DOMAIN）：不要带端口" ;;
+esac
+case "$APP_DOMAIN" in
+    *.*) : ;;
+    *) die "APP_DOMAIN 至少应包含一个点（当前：$APP_DOMAIN）" ;;
+esac
+log "对外域名：$APP_DOMAIN（请确认网关 server_name 与它逐字一致）"
+
 # 端口按引擎取默认值（§3.3 / §2.2）；不同则告警，仍以运维下发的值为准
 case "$DB_ENGINE" in
     mariadb) expect_port=3306 ;;
@@ -297,20 +312,20 @@ cat <<EOF
 部署完成。下一步请运维接入统一网关：
 
   1) 将交付包 deploy/gateway-site.conf 复制为 <项目名>.conf
-     确认 server_name 为 ${PROJECT_NAME}.lan
-     upstream 指向 ${CONTAINER}:80
+     确认 server_name 为 ${APP_DOMAIN}（必须逐字一致）
+     站点指向 ${CONTAINER}:80（resolver + 变量，禁止 upstream 块，见规范 §4.2）
   2) 运维执行：
        sudo cp ${PROJECT_NAME}.conf /home/docker/nginx/conf.d/
        sudo docker exec nginx-gateway nginx -t
        sudo docker exec nginx-gateway nginx -s reload
-  3) 确认终端可解析 ${PROJECT_NAME}.lan（内网 DNS 或 hosts）
+  3) 确认终端可解析 ${APP_DOMAIN}（内网 DNS；单机验证可在 /etc/hosts 写「<虚拟机 IP>  ${APP_DOMAIN}」）
 
 验收命令：
 
   ${DOCKER_SHOW} compose ps
   ${DOCKER_SHOW} inspect --format '{{.State.Health.Status}}' ${CONTAINER}
-  curl -s -H 'Host: ${PROJECT_NAME}.lan' http://127.0.0.1/api/v1/health
-  curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: ${PROJECT_NAME}.lan' http://127.0.0.1/
+  curl -s -H 'Host: ${APP_DOMAIN}' http://127.0.0.1/api/v1/health
+  curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: ${APP_DOMAIN}' http://127.0.0.1/
 
 日常运维：
 

@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.2 §3.1 / §6.1
+# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.3 §3.1 / §6.1
 #
 # 用法： bash tools/preflight.sh [--no-docker] [--help]
 #   --no-docker  跳过需要 docker 的检查（没有 docker 的机器也能跑基础检查）
@@ -156,6 +156,29 @@ if grep -rq 'CHANGE_ME' deploy/*.sql 2>/dev/null; then
     grep -rn 'CHANGE_ME' deploy/*.sql 2>/dev/null | head -n 5 | sed 's/^/         /'
 else
     pass "建库脚本无占位口令"
+fi
+
+# ---------- 8b. 对外域名（开发阶段必须确认） ----------
+sec "8b. 对外域名（APP_DOMAIN）"
+DOMAIN="$(grep -m1 -E '^APP_DOMAIN=' .env.example 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+CONF_DOMAIN="$(grep -m1 -E '^[[:space:]]*server_name' deploy/gateway-site.conf 2>/dev/null | sed -E 's/^[[:space:]]*server_name[[:space:]]+([^;[:space:]]+).*/\1/' || true)"
+if [ -z "$DOMAIN" ]; then
+    fail ".env.example 中缺少 APP_DOMAIN —— 开发启动前必须向运维确认对外域名"
+elif printf '%s' "$DOMAIN" | grep -q 'CHANGE_ME'; then
+    fail "APP_DOMAIN 仍是占位值（$DOMAIN）—— 开发启动前必须向运维确认对外域名"
+elif ! printf '%s' "$DOMAIN" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'; then
+    fail "APP_DOMAIN 格式不合法（$DOMAIN）—— 只写域名本身，不要带 http://、端口或路径"
+else
+    pass "APP_DOMAIN=$DOMAIN"
+fi
+if [ -z "$CONF_DOMAIN" ]; then
+    fail "deploy/gateway-site.conf 中读不到 server_name"
+elif [ -n "$DOMAIN" ] && [ "$CONF_DOMAIN" = "$DOMAIN" ]; then
+    pass "server_name 与 APP_DOMAIN 一致（$CONF_DOMAIN）"
+elif printf '%s' "$CONF_DOMAIN" | grep -q 'CHANGE_ME'; then
+    fail "deploy/gateway-site.conf 的 server_name 仍是占位值（$CONF_DOMAIN）"
+else
+    fail "server_name（$CONF_DOMAIN）与 APP_DOMAIN（$DOMAIN）不一致 —— 网关将匹配不到该域名"
 fi
 
 # ---------- 9. 静态托管接入顺序 ----------

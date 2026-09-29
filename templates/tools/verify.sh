@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.2 §6.3
+# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.3 §6.3
 #
 # 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--help]
 #   读同目录的 .env，逐项检查 §6.3 的 15 项验收要点，输出 PASS / WARN / FAIL。
@@ -51,7 +51,11 @@ PROJECT_NAME="${PROJECT_NAME:-}"
 [ -n "$PROJECT_NAME" ] || { echo "错误：.env 中缺少 PROJECT_NAME" >&2; exit 1; }
 IMAGE="${PROJECT_NAME}-app:latest"
 CONTAINER="${PROJECT_NAME}-app"
-DOMAIN="${PROJECT_NAME}.lan"
+# 对外域名来自 .env 的 APP_DOMAIN（开发阶段确认、运维分配），不再假定 <项目名>.lan
+DOMAIN="${APP_DOMAIN:-}"
+if [ -z "$DOMAIN" ]; then
+    warn "APP_DOMAIN 未配置：第 4-5/14-15 项无法用正确的 Host 头访问网关（见 §4.2）"
+fi
 
 if docker info >/dev/null 2>&1; then
     DOCKER=(docker)
@@ -170,7 +174,8 @@ pids="$("${DOCKER[@]}" inspect --format '{{.HostConfig.PidsLimit}}' "$CONTAINER"
 # ---------- 14 ----------
 sec "14. 防串站（多项目共用一台机时最易出的问题）"
 if command -v curl >/dev/null 2>&1; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: ${PROJECT_NAME}-nope.lan" "http://127.0.0.1/" || true)"
+    # 用 RFC 2606 保留域名 .invalid：它永远不可能出现在 conf.d 里，与项目域名无关
+    code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: no-such-host.invalid' "http://127.0.0.1/" || true)"
     if [ "$code" != "200" ]; then
         ok "未知域名被拒绝（HTTP ${code:-无响应}）"
     else
@@ -182,10 +187,12 @@ fi
 
 # ---------- 15 ----------
 sec "15. 域名解析"
-if command -v getent >/dev/null 2>&1 && getent hosts "$DOMAIN" >/dev/null 2>&1; then
+if [ -z "$DOMAIN" ]; then
+    warn "APP_DOMAIN 未配置，跳过域名解析检查（见 §4.2）"
+elif command -v getent >/dev/null 2>&1 && getent hosts "$DOMAIN" >/dev/null 2>&1; then
     ok "$DOMAIN 可解析：$(getent hosts "$DOMAIN" | head -n1)"
 else
-    warn "$DOMAIN 在本机解析不到；多人使用必须由运维在内网 DNS 加 A 记录（hosts 仅适合 1–2 台机器，见 §4.3）"
+    warn "$DOMAIN 在本机解析不到；多人使用必须由运维在内网 DNS 加 A 记录；单机模拟验证可在 /etc/hosts 写「<虚拟机 IP>  $DOMAIN」（见 §4.3）"
 fi
 
 # ---------- 汇总 ----------
