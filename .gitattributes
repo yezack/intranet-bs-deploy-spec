@@ -1,0 +1,26 @@
+# 行尾契约（本仓库自身）—— 与规范 §3.1 的 LF 要求一致
+#
+# 为什么需要：本仓库所有文件都必须以 LF 存储并检出——
+# 规范交付物（.sh / .env / .conf / .sql）一旦变成 CRLF 会直接失效
+# （shebang 失效、退出码 127），因此不能依赖各人本机的 core.autocrlf 设置。
+#
+# 与 templates/.gitattributes 的区别（两者职责不同，不要合并）：
+#   templates/.gitattributes 是「给交付项目用的模板」，只作用于 templates/ 之下；
+#   本文件是「本仓库自身的」行尾契约，作用于整个仓库。
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.sql   text eol=lf
+*.conf  text eol=lf
+*.yml   text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.env*  text eol=lf
+
+*.tar     binary
+*.tar.gz  binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.woff2   binary
