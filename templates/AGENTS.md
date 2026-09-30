@@ -3,7 +3,7 @@
 > 用法：把本文件放在交付包**根目录**，作为 AI 写代码时的第一入口。
 > 项目名占位符 `myapp` 必须整体替换为你的 `<项目名>`（与 `.env` 的 `PROJECT_NAME` 一致）。
 
-本项目按《内网 B/S 架构开发规范 v2.8》交付，最终运行在**内网离线 Linux x86_64 服务器**上，
+本项目按《内网 B/S 架构开发规范 v2.9》交付，最终运行在**内网离线 Linux x86_64 服务器**上，
 并与多个其他项目**共用同一台机器**。规范全文在上游规范仓库；**你只需要遵守本文件**。
 违反以下任一条，交付即不合格。
 
@@ -21,7 +21,7 @@
 10. **前端只能请求相对路径 `/api/v1/...`**，不得在构建期注入 host/IP。
 11. **宿主目录只映射三类**：`./conf:/app/conf:ro`、`./uploads:/data/uploads`、`./downloads:/data/downloads`；日志一律走 stdout/stderr，不得写日志文件。
 12. **必须接入 `gateway-network`（`external: true`）**；容器名固定 `<项目名>-app`，镜像 tag 固定 `<项目名>-app:latest`。
-13. **必须提供 `HEALTHCHECK`**，探测 `http://127.0.0.1:80/api/v1/health`；`start_period` 必须 ≥ 启动最坏耗时（**迁移重试上限 + 监听启动**，模板 60s），且 `HEALTH_TIMEOUT` ≥ `start_period + interval × retries`（§3.5 S9）。
+13. **必须提供 `HEALTHCHECK`**，探测 `http://127.0.0.1:80/api/v1/health`；`start_period` 必须 ≥ 启动最坏耗时（**迁移重试上限 + 监听启动**，模板 60s），且 `HEALTH_TIMEOUT` ≥ `start_period + interval × retries`（模板 60 + 30×3 = **150s**，故脚本默认取 **180s**；改了 compose 里这三个数就必须重算）（§3.5 S9）。
 14. **上传文件必须重命名 + 扩展名白名单 + 大小上限**，不得用用户提供的文件名拼接存储路径。
 15. **交付说明不得与规范冲突**：不得出现"在服务器上执行 `npm install` / 修改代码 / 手工建表"之类的步骤。
 16. **对外域名必须在开发启动前向运维确认**：写入 `.env.example` 的 `SITE_DOMAIN`，且 `deploy/gateway-site.conf` 的 `server_name` 必须与它逐字一致；**不得自行编造域名**（`tools/preflight.sh` 会因此拒绝交付）。

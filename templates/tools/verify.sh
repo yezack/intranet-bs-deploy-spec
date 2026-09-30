@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.8 §6.3
+# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.9 §6.3
 #
 # 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--drill] [--help]
 #   读同目录的 .env，逐项检查 §6.3 的 15 项验收要点，输出 PASS / WARN / FAIL。

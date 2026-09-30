@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v2.8** |
+| 版本 | **v2.9** |
 | 生效日期 | 2026-09-29 |
 | 适用范围 | 在互联网侧开发、需无缝迁移至内网 Linux（x86_64）服务器运行的 B/S 系统 |
 | 目标场景 | 几人到几十人小团队；**多个项目共用一台服务器** |
@@ -94,6 +94,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 
 | 版本 | 变化 |
 |---|---|
+| **v2.9** | **端到端演练（真实 kali 环境跑全链路：`build` → `save` → `init.sh` → 网关投放 → `verify.sh` → `verify.sh --drill` → 造坏镜像测回滚）抓出的两个模板级缺陷**：① **`templates/docker-compose.yml` 根本不是合法 YAML** —— 第 66–69 行缩进是 5 个空格（同级 `interval`/`timeout`/`retries` 是 6 个），`docker compose config` 直接报 `did not find expected key`，`docker compose up` 起不来，**照模板落地的项目根本无法部署**；该缺陷自 **v2.5** 引入，v2.6–v2.8 一路带着（此前对模板的验证只有 `bash -n` 与字符串 grep，从未让 YAML 解析器跑过一遍）。② **`HEALTH_TIMEOUT` 默认值与 S9 不等式矛盾**：`start_period 60s + interval 30s × retries 3 = 150s`，而 `init.sh`/`update.sh` 默认 120s，且 §3.5 S9 还**明文误写"120s 满足不等式"**（120 < 150，断言本身算错）—— 会让启动耗时 120–150s 的正常升级被判超时并**误回滚**；默认值改为 **180s**，S9 与 §5.1/§5.2、`AGENTS.md` 红线 13 同步更正，并在 `tools/preflight.sh` 新增 **4b 组**按该不等式做机器校验。本次演练同时实证了规范其余设计的可用性（哨兵渲染建库建号、非 root 绑 80、`PortBindings` 判据、`resolver` 网关不串站、`init.sh` 幂等、`update.sh` 自动回滚全路径）。 |
 | **v2.8** | **修掉"手改与自动渲染互相矛盾"的坑 + 补齐网关投放指引**：`deploy/init-db.*.sql` 的占位值由 `myapp_db` / `myapp_user` / `CHANGE_ME_STRONG_PASSWORD` 改为**渲染哨兵** `__DB_DATABASE__` / `__DB_USERNAME__` / `__DB_PASSWORD__`（原写法与文件头"必须替换示例值"的【强制】自相矛盾：按它手改后 `init.sh` 的 `sed` 就不再匹配，会**建了 A 库却连 B 库**），文件头改为"**禁止手改** + 给出可复制的渲染命令"，`init.sh` 与 §3.1/§5.1/`templates/README` 同步；`init.sh` 收尾指引补齐：**conf.d 路径不再写死**（改为"以 §2.2 基准为准，现场请与运维确认"）、新增**必查 `00-default.conf` 兜底站点**（含未知 Host 自检命令、"duplicate default server 不要删别人的"提示、同一人兼任的 §4.2 例外流程），验收命令补上 `project` 字段断言与防串站自检。 |
 | **v2.7** | **修掉 v2.6 自己引入的 5 个 bug + 吸收 5 条"假 PASS"根因**：① `verify.sh` 的 `DRILL=0` 原先在参数解析之后，`--drill` 是**死开关**（已移到循环之前）；② 演练判据由"快照数量增加"改为"**最新快照变化**"（`--keep 5` 稳态下数量不变，原判据必然假 FAIL）；③ `init.sh` 的 `DB_PROVISION=auto` 原先因 `require_env`/`reject_placeholder` 排在前面而**永远走不到随机生成口令的分支**（已改成条件校验）；④ `verify.sh` 缺 `SITE_DOMAIN` 由 `warn` 改为**判 FAIL**（与 init.sh 口径一致）；⑤ 验收第 4 项**校验响应体 `project` 字段**（`S8` 同步新增该字段强制）、第 15 项**校验解析到本机地址**（原"有输出即 PASS"会放过 198.18.0.54 与合成 AAAA）、第 9 项新增**可执行检查**（在镜像内扫 `/frontend` 外域引用）；⑥ `AGENTS.md` 吸收 S7/S8/S9（红线 8/13 改写 + 新增红线 17：启动期退出、运行期禁止退出）。 |
 | **v2.6** | **修掉模板自身的工程性倒退与流程漏项**：`.gitignore` 不再排除 `frontend/src`、`package.json`、`package-lock.json`（源码必须入库，否则 clone 后无法重建镜像）；§6.1 打包命令补 `.gitignore`、把 `frontend/dist` 改为整个 `frontend`（交付包必须含前端源码供复核）；§4.3 新增**多项目 conf.d 机制与投放规则**（加载顺序、`default_server` 唯一性、跨项目重名只能靠台账、投放后自检三件事）与目录示例；§4.2 补"开发与运维同一人兼任"的例外流程（先备份 → `nginx -t` → `reload` → 不改别人的 conf）；验收第 12 项**脚本化**（`tools/verify.sh --drill` 真跑一次同镜像升级，覆盖备份/重建/健康校验）；`preflight.sh` 把"刻意保留的占位口令"由 `WARN` 改为 **`NOTE`**（不计入 WARN，避免被当噪声），并在 §3.1 写明这是预期。 |

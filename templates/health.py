@@ -1,4 +1,4 @@
-"""健康检查（参考实现）—— 内网 B/S 架构开发规范 v2.8 §3.5 S1/S7/S8
+"""健康检查（参考实现）—— 内网 B/S 架构开发规范 v2.9 §3.5 S1/S7/S8
 
 放置位置：`backend/app/routers/health.py`（按项目结构调整导入路径；本文件假定
 `..database` 提供 `get_engine()` / `engine_label()`）。

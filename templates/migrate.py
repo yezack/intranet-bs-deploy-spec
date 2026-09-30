@@ -1,4 +1,4 @@
-"""版本化数据库迁移执行器（参考实现）—— 内网 B/S 架构开发规范 v2.8 §3.1 / §5.2
+"""版本化数据库迁移执行器（参考实现）—— 内网 B/S 架构开发规范 v2.9 §3.1 / §5.2
 
 放置位置：`backend/app/migrate.py`；在 FastAPI 的 lifespan 里调用
 `run_migrations(create_engine_from_env())`。

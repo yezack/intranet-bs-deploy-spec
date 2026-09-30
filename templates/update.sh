@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 版本更新脚本（自动快照 → 导入 → 重建 → 校验 → 失败自动回滚并告警）
-# 依据：内网 B/S 架构开发规范 v2.8 §5.2
+# 依据：内网 B/S 架构开发规范 v2.9 §5.2
 #
 # 用法： sudo ./update.sh [选项]
 #   --tar <文件>        指定镜像包，默认取本目录下最新的 *.tar
@@ -33,7 +33,10 @@ KEEP=5
 DO_ROLLBACK=1
 DRY_RUN=0
 ALLOW_SAME_IMAGE=0
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+# 健康等待上限必须 ≥ compose 的 start_period + interval × retries（规范 §3.5 S9）。
+# 模板 compose 为 60 + 30×3 = 150s；这里取 180s，为 3s 轮询粒度与探针耗时留余量。
+# 调小它会让"启动偏慢但代码正常"的升级被判超时 → 误回滚一次本来正常的升级（§5.2）。
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 
 usage() {
     awk '/^#USAGE-BEGIN$/{p=1;next} /^#USAGE-END$/{p=0} p' "$SELF" | sed 's/^# \{0,1\}//'

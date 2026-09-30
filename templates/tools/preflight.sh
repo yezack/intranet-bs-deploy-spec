@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.8 §3.1 / §6.1
+# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.9 §3.1 / §6.1
 #
 # 用法： bash tools/preflight.sh [--no-docker] [--help]
 #   --no-docker  跳过需要 docker 的检查（没有 docker 的机器也能跑基础检查）
@@ -90,6 +90,29 @@ if grep -qE '^[[:space:]]*user:' "$c" 2>/dev/null; then pass "非 root 运行（
 if grep -qE '^[[:space:]]*(mem_limit|cpus|pids_limit):' "$c" 2>/dev/null; then pass "资源限额存在"; else warn "缺少资源限额（mem_limit / cpus / pids_limit）"; fi
 if grep -q 'api/v1/health' "$c" 2>/dev/null; then pass "healthcheck 指向 /api/v1/health"; else fail "healthcheck 未指向 /api/v1/health"; fi
 if grep -q 'max-size: "50m"' "$c" 2>/dev/null; then pass "日志轮转 50m"; else warn "日志轮转未按 json-file 50m/3 配置"; fi
+
+# ---------- 4b. 启动预算不等式（S9） ----------
+# 这三个数字分散在三处——compose 的 start_period / interval / retries，以及 init.sh 的
+# HEALTH_TIMEOUT 默认值。单独改动任何一处都不会报错，只有放在一起算才会暴露矛盾：
+# v2.5–v2.8 就带着"120s 满足 60 + 30×3 = 150s"的错判出厂（照它跑，启动偏慢但正常的
+# 升级会被判超时并**误回滚**）。这类算术矛盾正适合机器校验，故在此固定一道闸门。
+sec "4b. 启动预算不等式（S9）"
+_sp="$(sed -nE 's/^[[:space:]]*start_period:[[:space:]]*([0-9]+)s.*/\1/p' "$c" 2>/dev/null | head -n1)"
+_iv="$(sed -nE 's/^[[:space:]]*interval:[[:space:]]*([0-9]+)s.*/\1/p' "$c" 2>/dev/null | head -n1)"
+_rt="$(sed -nE 's/^[[:space:]]*retries:[[:space:]]*([0-9]+).*/\1/p' "$c" 2>/dev/null | head -n1)"
+_ht="$(sed -nE 's/.*HEALTH_TIMEOUT="\$\{HEALTH_TIMEOUT:-([0-9]+)\}".*/\1/p' init.sh 2>/dev/null | head -n1)"
+if [ -z "$_sp" ] || [ -z "$_iv" ] || [ -z "$_rt" ]; then
+    warn "compose 中读不到完整的 start_period / interval / retries，跳过启动预算校验"
+elif [ -z "$_ht" ]; then
+    warn "init.sh 中读不到 HEALTH_TIMEOUT 默认值，跳过启动预算校验"
+else
+    _need=$(( _sp + _iv * _rt ))
+    if [ "$_ht" -ge "$_need" ]; then
+        pass "HEALTH_TIMEOUT=${_ht}s ≥ start_period ${_sp}s + interval ${_iv}s × retries ${_rt} = ${_need}s"
+    else
+        fail "HEALTH_TIMEOUT=${_ht}s < start_period ${_sp}s + interval ${_iv}s × retries ${_rt} = ${_need}s：启动偏慢但正常的升级会被判超时并误回滚（§3.5 S9）——请把 init.sh / update.sh 的默认值提到 ≥${_need}s，或调小 interval / retries"
+    fi
+fi
 
 # ---------- 5. Dockerfile ----------
 sec "5. Dockerfile"

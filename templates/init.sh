@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.8 §5.1
+# 依据：内网 B/S 架构开发规范 v2.9 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -26,7 +26,10 @@ cd "$SCRIPT_DIR"
 
 TAR=""
 DRY_RUN=0
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+# 健康等待上限必须 ≥ compose 的 start_period + interval × retries（规范 §3.5 S9）。
+# 模板 compose 为 60 + 30×3 = 150s；这里取 180s，为 3s 轮询粒度与探针耗时留余量。
+# 调小它会让"启动偏慢但代码正常"的部署被判超时 → init.sh 保留现场报错、update.sh 误回滚。
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 
 usage() {
     awk '/^#USAGE-BEGIN$/{p=1;next} /^#USAGE-END$/{p=0} p' "$SELF" | sed 's/^# \{0,1\}//'
