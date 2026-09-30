@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.5 §3.1 / §6.1
+# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.6 §3.1 / §6.1
 #
 # 用法： bash tools/preflight.sh [--no-docker] [--help]
 #   --no-docker  跳过需要 docker 的检查（没有 docker 的机器也能跑基础检查）
@@ -33,6 +33,7 @@ FAILED=0
 pass() { printf '  [PASS] %s\n' "$*"; }
 fail() { printf '  [FAIL] %s\n' "$*"; FAILED=$((FAILED + 1)); }
 warn() { printf '  [WARN] %s\n' "$*"; }
+note() { printf '  [NOTE] %s\n' "$*"; }   # 预期提示：不计入 FAIL/WARN，避免把"刻意保留的占位值"当成噪声
 sec()  { printf '\n== %s ==\n' "$*"; }
 
 printf '交付前闸门：%s\n' "$PROJECT_ROOT"
@@ -151,11 +152,14 @@ else
     fi
 fi
 # 建库脚本的口令本就由运维在部署时统一替换，这里只提醒，不算 FAIL
+# 【NOTE 而非 WARN】建库脚本里的占位口令是**刻意保留**的：开发方不知道运维将要设的口令，
+# 交付时它必然是占位值，由运维执行前替换（见规范 §3.1 的"预期占位值"说明）。
+# 用 NOTE 输出，避免每次交付都出现一条 WARN 而被当成噪声忽略。
 if grep -rq 'CHANGE_ME' deploy/*.sql 2>/dev/null; then
-    warn "deploy/*.sql 仍含 CHANGE_ME 占位口令（正常）—— 请在交付说明中写明“运维执行前须替换为与 .env 一致的真实口令”"
+    note "deploy/*.sql 保留 CHANGE_ME 占位口令（**预期**，不是缺陷）：请在交付说明中写明“运维执行前替换为与 .env 的 DB_PASSWORD 一致的口令”"
     grep -rn 'CHANGE_ME' deploy/*.sql 2>/dev/null | head -n 5 | sed 's/^/         /'
 else
-    pass "建库脚本无占位口令"
+    pass "建库脚本无占位口令（已由 DB_PROVISION=auto 生成或人工替换）"
 fi
 
 # ---------- 8b. 对外域名（开发阶段必须确认） ----------

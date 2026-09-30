@@ -3,10 +3,12 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.5 §6.3
+# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.6 §6.3
 #
-# 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--help]
+# 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--drill] [--help]
 #   读同目录的 .env，逐项检查 §6.3 的 15 项验收要点，输出 PASS / WARN / FAIL。
+#   --drill  额外做一次**升级演练**：真跑 ./update.sh --allow-same-image，
+#            覆盖「备份 → 重建 → 健康校验」全路径（会重建容器，属主动操作；默认不做）。
 #
 # 退出码： 0 无 FAIL（可能有 WARN，需人工确认） | 1 存在 FAIL | 127 解释器不可用（脚本为 CRLF 行尾时）
 #USAGE-END
@@ -24,12 +26,14 @@ usage() {
 
 for a in "$@"; do
     case "$a" in
+        --drill)   DRILL=1; shift ;;
         --help|-h) usage ;;
-        *) echo "未知参数：$a（用 --help 查看用法）" >&2; exit 1 ;;
+       *) echo "未知参数：$a（用 --help 查看用法）" >&2; exit 1 ;;
     esac
 done
 
 n_pass=0; n_warn=0; n_fail=0
+DRILL=0
 ok()   { n_pass=$((n_pass + 1)); printf '  [PASS] %s\n' "$*"; }
 bad()  { n_fail=$((n_fail + 1)); printf '  [FAIL] %s\n' "$*"; }
 warn() { n_warn=$((n_warn + 1)); printf '  [WARN] %s\n' "$*"; }
@@ -177,7 +181,23 @@ for f in init.sh update.sh; do
 done
 [ -f tools/preflight.sh ] && ok "tools/preflight.sh 随包交付" || warn "缺少 tools/preflight.sh"
 [ -d backups ] && ok "backups/ 已存在" || warn "backups/ 尚未创建（首次升级后由 update.sh 生成）"
-info "「init.sh 可重复执行 / update.sh 能备份与回滚」无法在验收时自动验证，请在交付演练中确认（见 §5）"
+if [ "$DRILL" = 1 ]; then
+    # 升级演练：同镜像重放（--allow-same-image），覆盖 备份 → 重建 → 健康校验 全路径。
+    info "开始升级演练：./update.sh --allow-same-image（会重建容器）"
+    before="$(ls -1d backups/*/ 2>/dev/null | wc -l | tr -d ' ')"
+    if ./update.sh --allow-same-image >/tmp/verify-drill.log 2>&1; then
+        after="$(ls -1d backups/*/ 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$after" -gt "$before" ]; then
+            ok "升级演练通过（退出码 0），且新增了备份快照（$before → $after）"
+        else
+            bad "升级演练退出码 0，但 backups/ 没有新增快照 —— update.sh 的备份步骤可能已失效"
+        fi
+    else
+        bad "升级演练失败（日志 /tmp/verify-drill.log 末尾）：$(tail -n 3 /tmp/verify-drill.log 2>/dev/null | tr '\n' ' ')"
+    fi
+else
+    info "「update.sh 能备份与回滚」可脚本化验证：bash tools/verify.sh --drill（会真跑一次同镜像升级；不加 --drill 时只做上面的存在性检查）"
+fi
 
 # ---------- 13 ----------
 sec "13. 资源限额"

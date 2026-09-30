@@ -1,4 +1,4 @@
-# 版本库排除规则 —— 内网 B/S 架构开发规范 v2.5 §4.4 / S5
+# 版本库排除规则 —— 内网 B/S 架构开发规范 v2.6 §4.4 / S5
 #
 # 【强制】S5：敏感信息一律走 .env，.env 不得提交进版本库。
 # 本文件是强制交付物（§3.1），必须包含 .env 与 .local/ 两条规则。
@@ -32,10 +32,12 @@ __pycache__/
 .ruff_cache/
 frontend/.vite/
 
-# ---------- 构建投入物（源码与产物都不必入库）----------
-frontend/src/
-frontend/package.json
-frontend/package-lock.json
+# ---------- 前端：源码必须入库，产物与依赖不必 ----------
+# 【强制】前端**源码、依赖清单与 .npmrc 必须入库**（否则 clone 后无法重建镜像，
+# 也无法审计——规范的目标是"离线可交付、可复核"）。不入库的只有依赖与构建产物：
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # ---------- 离线镜像包与归档 ----------
 *.tar

@@ -1,4 +1,4 @@
--- 依据：内网 B/S 架构开发规范 v2.5 §3.3
+-- 依据：内网 B/S 架构开发规范 v2.6 §3.3
 -- 用途：由运维在共享 PostgreSQL 中为项目创建库与账号（pgsql 待运维部署）
 -- 执行方式（**不要把 root 口令写进命令行**：`ps` 与 shell history 都会泄漏）：
 --   1) 推荐：让 init.sh 代劳 —— 在 .env 里设 DB_PROVISION=auto（pg 分支用 .pgpass 传凭证）。
