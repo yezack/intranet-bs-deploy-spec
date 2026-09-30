@@ -1,4 +1,4 @@
-# 构建上下文裁剪 —— 内网 B/S 架构开发规范 v2.3 §3.1 / §4.4
+# 构建上下文裁剪 —— 内网 B/S 架构开发规范 v2.4 §3.1 / §4.4
 #
 # 为什么必须存在：构建上下文 = 交付包根目录，而根目录里会有
 #   <项目名>-app.tar（可达 GB 级）与 frontend/node_modules。
@@ -44,8 +44,11 @@ venv/
 .dockerignore
 .github/
 docs/
-deploy/
 tools/
+
+# 注意：deploy/ **刻意不排除** —— Dockerfile 需要 `COPY deploy/migrations /app/migrations`
+# （§5.2 的版本化迁移）。若在这里排除 deploy/，镜像里就没有迁移文件；
+# 一旦采用「应用启动时自动迁移」，首次部署会因表不存在而启动失败。
 *.md
 .update.lock
 *.log

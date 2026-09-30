@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 版本更新脚本（自动快照 → 导入 → 重建 → 校验 → 失败自动回滚并告警）
-# 依据：内网 B/S 架构开发规范 v2.3 §5.2
+# 依据：内网 B/S 架构开发规范 v2.4 §5.2
 #
 # 用法： sudo ./update.sh [选项]
 #   --tar <文件>        指定镜像包，默认取本目录下最新的 *.tar
@@ -120,6 +120,11 @@ esac
 IMAGE="${PROJECT_NAME}-app:latest"
 CONTAINER="${PROJECT_NAME}-app"
 
+# 网关容器名：只用于打印给运维的命令。真名按「谁发布了宿主 :80」探测，与名字无关（规范 §2.2）；
+# 探测不到时回退到 .env 的 GATEWAY_CONTAINER（基准环境值只作兜底）。
+GATEWAY_NAME="$("${DOCKER[@]}" ps --filter publish=80 --format '{{.Names}}' 2>/dev/null | head -n1)"
+GATEWAY_NAME="${GATEWAY_NAME:-${GATEWAY_CONTAINER:-nginx-gateway}}"
+
 [ -d backups ] || run mkdir -p backups
 
 alert() {
@@ -226,7 +231,7 @@ if [ "$DRY_RUN" = 0 ]; then
     if [ -n "$IP_BEFORE" ] && [ "$IP_BEFORE" != "$IP_AFTER" ]; then
         warn "容器 IP 已变化：${IP_BEFORE}→${IP_AFTER}"
         echo "  若网关配置仍是 upstream 块写法，请让运维立即执行："
-        echo "    ${DOCKER_SHOW} exec nginx-gateway nginx -t && ${DOCKER_SHOW} exec nginx-gateway nginx -s reload"
+        echo "    ${DOCKER_SHOW} exec ${GATEWAY_NAME} nginx -t && ${DOCKER_SHOW} exec ${GATEWAY_NAME} nginx -s reload"
         echo "  （改用 resolver + 变量 proxy_pass 的站点配置可自动跟随，见模板 deploy/gateway-site.conf）"
     fi
 fi
@@ -314,7 +319,7 @@ cat <<EOF
 验收：
   ${DOCKER_SHOW} compose ps
   ${DOCKER_SHOW} inspect --format '{{.State.Health.Status}}' ${CONTAINER}
-  curl -s -H 'Host: ${APP_DOMAIN:-<APP_DOMAIN>}' http://127.0.0.1/api/v1/health
+  curl -s -H 'Host: ${SITE_DOMAIN:-<SITE_DOMAIN>}' http://127.0.0.1/api/v1/health
 
 如需回滚到更新前版本：
   ${DOCKER_SHOW} load -i ${ROLLBACK_IMG:-<快照中的镜像包>}

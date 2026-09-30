@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.3 §5.1
+# 依据：内网 B/S 架构开发规范 v2.4 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -163,18 +163,18 @@ fi
 
 # ---------- 对外域名（开发阶段确认，部署侧只校验）----------
 # 域名由运维分配、在项目开发阶段写入 .env.example；这里只拦「没确认」和「格式不对」。
-APP_DOMAIN="${APP_DOMAIN:-}"
-[ -n "$APP_DOMAIN" ] || die ".env 中缺少 APP_DOMAIN（对外域名）。它应在开发阶段向运维确认后填入，例：APP_DOMAIN=xz.sjq.sh"
-case "$APP_DOMAIN" in
-    *CHANGE_ME*) die "APP_DOMAIN 仍是占位值（$APP_DOMAIN）。请向运维确认本项目对外域名后再部署" ;;
-    *://*|*/*)   die "APP_DOMAIN 格式不合法（$APP_DOMAIN）：只写域名本身，不要带 http:// 或路径" ;;
-    *:*)         die "APP_DOMAIN 格式不合法（$APP_DOMAIN）：不要带端口" ;;
+SITE_DOMAIN="${SITE_DOMAIN:-}"
+[ -n "$SITE_DOMAIN" ] || die ".env 中缺少 SITE_DOMAIN（对外域名）。它应在开发阶段向运维确认后填入，例：SITE_DOMAIN=xz.sjq.sh"
+case "$SITE_DOMAIN" in
+    *CHANGE_ME*) die "SITE_DOMAIN 仍是占位值（$SITE_DOMAIN）。请向运维确认本项目对外域名后再部署" ;;
+    *://*|*/*)   die "SITE_DOMAIN 格式不合法（$SITE_DOMAIN）：只写域名本身，不要带 http:// 或路径" ;;
+    *:*)         die "SITE_DOMAIN 格式不合法（$SITE_DOMAIN）：不要带端口" ;;
 esac
-case "$APP_DOMAIN" in
+case "$SITE_DOMAIN" in
     *.*) : ;;
-    *) die "APP_DOMAIN 至少应包含一个点（当前：$APP_DOMAIN）" ;;
+    *) die "SITE_DOMAIN 至少应包含一个点（当前：$SITE_DOMAIN）" ;;
 esac
-log "对外域名：$APP_DOMAIN（请确认网关 server_name 与它逐字一致）"
+log "对外域名：$SITE_DOMAIN（请确认网关 server_name 与它逐字一致）"
 
 # 端口按引擎取默认值（§3.3 / §2.2）；不同则告警，仍以运维下发的值为准
 case "$DB_ENGINE" in
@@ -198,14 +198,36 @@ CONTAINER="${PROJECT_NAME}-app"
 "${DOCKER[@]}" network inspect gateway-network >/dev/null 2>&1 \
     || die "缺少 gateway-network（统一网关网络）。请运维先执行： docker network create gateway-network"
 
-# 宿主 80 端口应恰好由 nginx-gateway 占用
+# 宿主 :80 的判定**与容器名无关**（规范 §2.2 / §4.1）：
+#   ① 有容器发布了宿主 :80；② 该容器在 gateway-network 上。
+# 第 ② 条是必需的：本项目按 §3.2 不发布任何宿主端口，网关只能通过 gateway-network 里的
+# 容器名找到我们；宿主级 nginx/apache 即使占着 :80 也解析不到容器名（只能写死 IP，容器一重建就 502）。
+# 另：网桥**不持有端口**；宿主侧监听者是 docker-proxy（发布动作的宿主侧代理）。
+GATEWAY_NAME=""
 if command -v ss >/dev/null 2>&1 && ss -lnt 2>/dev/null | awk 'NR>1 {print $4}' | grep -qE '[:.]80$'; then
-    if "${DOCKER[@]}" ps --format '{{.Names}}' 2>/dev/null | grep -qx nginx-gateway; then
-        log "宿主 80 端口由 nginx-gateway 占用，符合预期"
+    gateway_container="$("${DOCKER[@]}" ps --filter publish=80 --format '{{.Names}}' 2>/dev/null | head -n1)"
+    if [ -z "$gateway_container" ]; then
+        port80_proc="$(ss -lntp 2>/dev/null | awk 'NR>1 && $4 ~ /[:.]80$/' | grep -oE '"[A-Za-z0-9_.+-]+"' | tr -d '"' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+        if [ -n "${GATEWAY_PROCESS:-}" ]; then
+            log "宿主 :80 由宿主级进程「${port80_proc:-未知}」监听，且 .env 已用 GATEWAY_PROCESS=${GATEWAY_PROCESS} 显式确认，按运维约定放行"
+        else
+            die "宿主 :80 被「${port80_proc:-未知}」占用，但没有容器发布它。
+     若这是运维约定的宿主级反向代理，请在 .env 里写 GATEWAY_PROCESS=<进程名> 显式确认后再执行；
+     否则请先释放该端口（本项目对外只经容器化的统一网关）。"
+        fi
     else
-        die "宿主 80 端口被非 nginx-gateway 进程占用，请先释放： ss -lntp | grep ':80'"
+        GATEWAY_NAME="$gateway_container"
+        if "${DOCKER[@]}" inspect "$gateway_container" \
+                --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null \
+                | grep -qw gateway-network; then
+            log "宿主 :80 由网关容器 ${gateway_container} 发布，且它在 gateway-network 上，可按容器名解析到 ${CONTAINER}，符合预期"
+        else
+            warn "宿主 :80 由容器 ${gateway_container} 发布，但它不在 gateway-network 上：无法按容器名解析到 ${CONTAINER}（本项目不发布宿主端口）。请运维把网关接入 gateway-network 后 reload"
+        fi
     fi
 fi
+# 打印给运维的命令用探测到的真名；探测不到（网关没在跑）时回退到 .env 的 GATEWAY_CONTAINER
+GATEWAY_NAME="${GATEWAY_NAME:-${GATEWAY_CONTAINER:-nginx-gateway}}"
 
 log "预检通过：PROJECT_NAME=$PROJECT_NAME  IMAGE=$IMAGE"
 
@@ -312,20 +334,20 @@ cat <<EOF
 部署完成。下一步请运维接入统一网关：
 
   1) 将交付包 deploy/gateway-site.conf 复制为 <项目名>.conf
-     确认 server_name 为 ${APP_DOMAIN}（必须逐字一致）
+     确认 server_name 为 ${SITE_DOMAIN}（必须逐字一致）
      站点指向 ${CONTAINER}:80（resolver + 变量，禁止 upstream 块，见规范 §4.2）
   2) 运维执行：
        sudo cp ${PROJECT_NAME}.conf /home/docker/nginx/conf.d/
-       sudo docker exec nginx-gateway nginx -t
-       sudo docker exec nginx-gateway nginx -s reload
-  3) 确认终端可解析 ${APP_DOMAIN}（内网 DNS；单机验证可在 /etc/hosts 写「<虚拟机 IP>  ${APP_DOMAIN}」）
+       sudo docker exec ${GATEWAY_NAME} nginx -t
+       sudo docker exec ${GATEWAY_NAME} nginx -s reload
+  3) 确认终端可解析 ${SITE_DOMAIN}（内网 DNS；单机验证可在 /etc/hosts 写「<虚拟机 IP>  ${SITE_DOMAIN}」）
 
 验收命令：
 
   ${DOCKER_SHOW} compose ps
   ${DOCKER_SHOW} inspect --format '{{.State.Health.Status}}' ${CONTAINER}
-  curl -s -H 'Host: ${APP_DOMAIN}' http://127.0.0.1/api/v1/health
-  curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: ${APP_DOMAIN}' http://127.0.0.1/
+  curl -s -H 'Host: ${SITE_DOMAIN}' http://127.0.0.1/api/v1/health
+  curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: ${SITE_DOMAIN}' http://127.0.0.1/
 
 日常运维：
 

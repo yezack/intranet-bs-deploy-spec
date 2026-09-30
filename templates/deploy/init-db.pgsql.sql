@@ -1,4 +1,4 @@
--- 依据：内网 B/S 架构开发规范 v2.3 §3.3
+-- 依据：内网 B/S 架构开发规范 v2.4 §3.3
 -- 用途：由运维在共享 PostgreSQL 中为项目创建库与账号（pgsql 待运维部署）
 -- 执行：docker exec -i pgsql psql -U postgres -v ON_ERROR_STOP=1 < init-db.pgsql.sql
 --

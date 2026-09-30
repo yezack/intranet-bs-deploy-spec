@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.3 §6.3
+# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.4 §6.3
 #
 # 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--help]
 #   读同目录的 .env，逐项检查 §6.3 的 15 项验收要点，输出 PASS / WARN / FAIL。
@@ -51,10 +51,10 @@ PROJECT_NAME="${PROJECT_NAME:-}"
 [ -n "$PROJECT_NAME" ] || { echo "错误：.env 中缺少 PROJECT_NAME" >&2; exit 1; }
 IMAGE="${PROJECT_NAME}-app:latest"
 CONTAINER="${PROJECT_NAME}-app"
-# 对外域名来自 .env 的 APP_DOMAIN（开发阶段确认、运维分配），不再假定 <项目名>.lan
-DOMAIN="${APP_DOMAIN:-}"
+# 对外域名来自 .env 的 SITE_DOMAIN（开发阶段确认、运维分配），不再假定 <项目名>.lan
+DOMAIN="${SITE_DOMAIN:-}"
 if [ -z "$DOMAIN" ]; then
-    warn "APP_DOMAIN 未配置：第 4-5/14-15 项无法用正确的 Host 头访问网关（见 §4.2）"
+    warn "SITE_DOMAIN 未配置：第 4-5/14-15 项无法用正确的 Host 头访问网关（见 §4.2）"
 fi
 
 if docker info >/dev/null 2>&1; then
@@ -74,9 +74,24 @@ sec "1. 镜像 tag"
 if "${DOCKER[@]}" image inspect "$IMAGE" >/dev/null 2>&1; then ok "$IMAGE 存在"; else bad "缺少镜像 $IMAGE"; fi
 
 # ---------- 2 ----------
+# 判据是**真正的宿主端口绑定**（HostConfig.PortBindings），不是 `docker ps` 的 PORTS 列——
+# 两者不等价：Dockerfile 里的 `EXPOSE 80`（模板就有）会让 PORTS 列显示 "80/tcp"，
+# 那只是"声明容器内监听"，并没有发布到宿主（`docker port` 为空、PortBindings 为 {}）。
+# 规范 §3.2 禁止的是 compose 里的 `ports:`，即真正把容器端口发布到宿主。
+# 按 PORTS 列判会与模板 Dockerfile 自相矛盾、永远 FAIL，故此处以 PortBindings 为准判据。
 sec "2. 宿主端口映射"
+bindings="$("${DOCKER[@]}" inspect --format '{{json .HostConfig.PortBindings}}' "$CONTAINER" 2>/dev/null || true)"
 ports="$("${DOCKER[@]}" ps --filter "name=^/${CONTAINER}$" --format '{{.Ports}}' 2>/dev/null || true)"
-if [ -z "$ports" ]; then ok "PORTS 列为空（无宿主端口映射）"; else bad "存在宿主端口映射：$ports"; fi
+case "$bindings" in
+    ""|"{}"|"null")
+        if [ -z "$ports" ]; then
+            ok "无宿主端口映射（PortBindings 为空，PORTS 列也为空）"
+        else
+            ok "无宿主端口绑定（PortBindings 为空）；PORTS 列的 ${ports} 只是 Dockerfile 的 EXPOSE 声明，未发布到宿主"
+        fi ;;
+    *)
+        bad "存在宿主端口映射：$bindings" ;;
+esac
 
 # ---------- 3 ----------
 sec "3. 健康状态"
@@ -188,7 +203,7 @@ fi
 # ---------- 15 ----------
 sec "15. 域名解析"
 if [ -z "$DOMAIN" ]; then
-    warn "APP_DOMAIN 未配置，跳过域名解析检查（见 §4.2）"
+    warn "SITE_DOMAIN 未配置，跳过域名解析检查（见 §4.2）"
 elif command -v getent >/dev/null 2>&1 && getent hosts "$DOMAIN" >/dev/null 2>&1; then
     ok "$DOMAIN 可解析：$(getent hosts "$DOMAIN" | head -n1)"
 else

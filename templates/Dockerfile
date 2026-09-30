@@ -1,4 +1,4 @@
-# <项目名> 应用镜像 —— 内网 B/S 架构开发规范 v2.3 合规
+# <项目名> 应用镜像 —— 内网 B/S 架构开发规范 v2.4 合规
 #
 # 架构：单容器。FastAPI 同时提供
 #   ① 前端静态： /frontend  （SPA，镜像内置，无宿主映射）
@@ -39,6 +39,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 业务代码
 COPY backend/app ./app
+
+# 版本化迁移（规范 §5.2）：应用启动时自动前滚，因此必须打进镜像。
+# 注意：.dockerignore 不得排除 deploy/，否则这里没有文件可 COPY。
+COPY deploy/migrations /app/migrations
 
 # 前端构建产物 → 容器内 /frontend（规范 §4.5 强制路径）
 COPY frontend/dist /frontend

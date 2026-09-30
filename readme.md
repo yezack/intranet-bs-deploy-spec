@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v2.3** |
+| 版本 | **v2.4** |
 | 生效日期 | 2026-09-29 |
 | 适用范围 | 在互联网侧开发、需无缝迁移至内网 Linux（x86_64）服务器运行的 B/S 系统 |
 | 目标场景 | 几人到几十人小团队；**多个项目共用一台服务器** |
@@ -13,7 +13,7 @@
 | 取代关系 | 取代《B/S 部署规范 v1.2》；v2.0 的章节结构已重构 |
 
 **关键词**：`<项目名>` 一律指小写字母、数字与连字符组成的项目代号（如 `myapp`），且必须与交付包目录名、容器名前缀、镜像名前缀保持一致。
-**`<APP_DOMAIN>`** 指本项目的对外访问域名（`.env` 的 `APP_DOMAIN`，由运维分配，**开发阶段确认**），如 `xz.sjq.sh`。
+**`<SITE_DOMAIN>`** 指本项目的对外访问域名（`.env` 的 `SITE_DOMAIN`，由运维分配，**开发阶段确认**），如 `xz.sjq.sh`。
 
 ---
 
@@ -22,7 +22,7 @@
 **给 AI 与开发者的第一入口**：把 [`templates/AGENTS.md`](templates/AGENTS.md) 放进项目根目录——一页红线，违反任一即返工。
 
 **第 0 步（开发启动前）：确认对外域名**
-向运维确认本项目的访问域名，填入 `.env.example` 的 `APP_DOMAIN`，并让 `deploy/gateway-site.conf` 的 `server_name` 与它**逐字一致**。未确认域名不得开工——交付前闸门会因此拒绝打包。
+向运维确认本项目的访问域名，填入 `.env.example` 的 `SITE_DOMAIN`，并让 `deploy/gateway-site.conf` 的 `server_name` 与它**逐字一致**。未确认域名不得开工——交付前闸门会因此拒绝打包。
 
 **五步交付（构建机）**
 
@@ -43,13 +43,13 @@ bash tools/preflight.sh
 ```bash
 sudo mkdir -p /home/docker/<项目名>
 sudo tar xzf <项目名>-delivery.tar.gz -C /home/docker/<项目名>
-# .env：APP_DOMAIN 已在开发阶段确认；DB_ENGINE 保持 mariadb（sqlite 仅本地开发，见 §3.6）；
+# .env：SITE_DOMAIN 已在开发阶段确认；DB_ENGINE 保持 mariadb（sqlite 仅本地开发，见 §3.6）；
 #       DB_* 由运维下发；SECRET_KEY 可留空（init.sh 会自动生成并写回）
 cd /home/docker/<项目名> && cp .env.example .env && vi .env && chmod 600 .env && chmod +x init.sh update.sh
 sudo ./init.sh
 ```
 
-之后请运维投放 `deploy/gateway-site.conf`（`nginx -t` + `nginx -s reload`）。单机验证可在**目标虚拟机自身**的 `/etc/hosts` 写 `<虚拟机 IP>  <APP_DOMAIN>`；多人使用则必须由运维在内网 DNS 加 A 记录。
+之后请运维投放 `deploy/gateway-site.conf`（`nginx -t` + `nginx -s reload`）。单机验证可在**目标虚拟机自身**的 `/etc/hosts` 写 `<虚拟机 IP>  <SITE_DOMAIN>`；多人使用则必须由运维在内网 DNS 加 A 记录。
 
 **验收：一条命令跑完 15 项**
 
@@ -79,7 +79,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 | 模板 | 用途 |
 |---|---|
 | `AGENTS.md`、`tools/preflight.sh`、`tools/verify.sh` | 一页红线、交付前闸门、现场验收（vibecoding 关键） |
-| `Dockerfile`、`docker-compose.yml`、`.env.example` | 单容器镜像与编排（`.env.example` 含 `APP_DOMAIN` / `DB_ENGINE`） |
+| `Dockerfile`、`docker-compose.yml`、`.env.example` | 单容器镜像与编排（`.env.example` 含 `SITE_DOMAIN` / `DB_ENGINE`） |
 | `db.py` | 连接串唯一构造点（`DB_ENGINE` 开关：本地 sqlite / 内网共享库，§3.6） |
 | `.dockerignore`、`.gitattributes`、`.gitignore` | 构建上下文裁剪、锁定 LF 行尾、版本库排除 |
 | `init.sh`、`update.sh` | 首次部署与带自动回滚的升级 |
@@ -92,7 +92,8 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 
 | 版本 | 变化 |
 |---|---|
-| **v2.3** | **对外域名成为开发阶段的显式输入**：`.env.example` 新增 `APP_DOMAIN`（占位值 `CHANGE_ME_DOMAIN`）；`AGENTS.md` 新增红线第 16 条；`tools/preflight.sh` 新增 **8b** 校验（占位值 / 格式 / 与 `deploy/gateway-site.conf` 的 `server_name` 一致性，不一致即禁止交付）；`init.sh` 在预检阶段校验但**不询问**，`update.sh` 与 `tools/verify.sh` 改为从 `APP_DOMAIN` 派生；防串站验收改用 RFC 2606 保留域名 `no-such-host.invalid`；§4.3 增补「目标 VM `/etc/hosts` 单机模拟」指引。清掉了原先把 `<项目名>.lan` 写死在 17 处的硬编码——其中 `verify.sh` 的硬编码会让真实验收把正确的部署判为失败。 |
+| **v2.4** | **把真实部署踩到的问题回灌进规范**（参考 Kali VM 上的 snake）：验收第 2 项改以 `HostConfig.PortBindings` 为判据（原按 `docker ps` 的 `PORTS` 列判，与模板 `Dockerfile` 的 `EXPOSE 80` 自相矛盾，**任何合规部署都必然 FAIL**）；`init.sh` 的宿主 :80 判定改为**与容器名无关**（有容器发布 :80 且在 `gateway-network` 上），新增 `GATEWAY_CONTAINER` / `GATEWAY_PROCESS`；§2.2 明确「基准值必须运行时探测」与「网桥不持有端口 / `EXPOSE` ≠ `ports:`」；域名键统一为 **`SITE_DOMAIN`** 且**未配置直接报错**（不再静默回退 `<项目名>.lan`，避免假 PASS）；红线 7 与 §4.6 给出**可满足**的鉴权口径（认证入口须逐条枚举、禁止通配）；`.env` 值约束由「允许集」改为**禁止集**（`/` 等恢复正常，`ALERT_WEBHOOK` 填 URL 不再自相矛盾）；新增**跨方言 DDL 取舍表**与**迁移三条硬规则**；`.dockerignore` 不再排除 `deploy/`，`Dockerfile` 增加 `COPY deploy/migrations /app/migrations`。 |
+| **v2.3** | **对外域名成为开发阶段的显式输入**：`.env.example` 新增 `SITE_DOMAIN`（占位值 `CHANGE_ME_DOMAIN`）；`AGENTS.md` 新增红线第 16 条；`tools/preflight.sh` 新增 **8b** 校验（占位值 / 格式 / 与 `deploy/gateway-site.conf` 的 `server_name` 一致性，不一致即禁止交付）；`init.sh` 在预检阶段校验但**不询问**，`update.sh` 与 `tools/verify.sh` 改为从 `SITE_DOMAIN` 派生；防串站验收改用 RFC 2606 保留域名 `no-such-host.invalid`；§4.3 增补「目标 VM `/etc/hosts` 单机模拟」指引。清掉了原先把 `<项目名>.lan` 写死在 17 处的硬编码——其中 `verify.sh` 的硬编码会让真实验收把正确的部署判为失败。 |
 | v2.2 | 新增**数据库引擎开关** `DB_ENGINE`（`sqlite` 仅本地开发 / `mariadb`·`pgsql` 内网共享库），新增 [§3.6](docs/03-强制条款.md)；连接串收口到**唯一构造点** `backend/app/db.py`；`init.sh` / `update.sh` / `tools/verify.sh` 三处拒绝 `DB_ENGINE=sqlite`；新增 `.gitignore` 模板。 |
 | v2.1 | **章节重构**：原 §3「技术栈」并入 §1.1；原 §5+§6 合并为 §4；原 §4→§3、§7→§5、§8→§6。新增 `AGENTS.md`、`tools/preflight.sh`、`tools/verify.sh`、`.dockerignore`、`.gitattributes`；网关站点配置改为 `resolver` + 变量 `proxy_pass`（**禁用 `upstream`**）并补安全响应头；`update.sh` 改为**时间戳快照备份**与编排回滚；资源限额改用 `mem_limit`/`cpus`/`pids_limit`；Dockerfile 显式安装 tzdata；`APP_UID`/`APP_GID` 统一映射目录属主；新增 `§6.5 项目下线`；验收扩至 15 项并脚本化。 |
 | v2.0 | 按原始需求 7 条重构为 §1–§8 章节结构，取代 v1.2。 |

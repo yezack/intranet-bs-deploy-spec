@@ -1,4 +1,4 @@
--- 依据：内网 B/S 架构开发规范 v2.3 §3.3
+-- 依据：内网 B/S 架构开发规范 v2.4 §3.3
 -- 用途：由运维在共享 MariaDB 中为项目创建库与账号（开发方不直接操作共享数据库）
 -- 执行：docker exec -i mariadb mysql -uroot -p'<root密码>' < init-db.mariadb.sql
 --
