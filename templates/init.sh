@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.6 §5.1
+# 依据：内网 B/S 架构开发规范 v2.7 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -110,10 +110,18 @@ case "$DB_ENGINE" in
      sqlite 仅限本地开发，内网部署请用 mariadb 或 pgsql。" ;;
 esac
 
-# 只有连共享库时才需要这五项（sqlite 分支已在上方终止）
-for k in DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD; do
-    require_env "$k"
-done
+# 只有连共享库时才需要这几项（sqlite 分支已在上方终止）。
+# 【DB_PROVISION=auto 时不要求 DB_PASSWORD 已填】——它由下方"数据库供给"随机生成并写回 .env。
+# v2.6 把这两道校验放在 auto 分支之前，导致 auto 模式永远走不到生成分支（文档承诺与实现相反）。
+if [ "${DB_PROVISION:-manual}" = "auto" ]; then
+    for k in DB_HOST DB_PORT DB_DATABASE DB_USERNAME; do
+        require_env "$k"
+    done
+else
+    for k in DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD; do
+        require_env "$k"
+    done
+fi
 
 # 拒绝 .env.example 的占位值残留：原样复制后没填也要在预检阶段拦住
 reject_placeholder() {
@@ -125,9 +133,14 @@ reject_placeholder() {
     esac
 }
 
-for k in DB_PASSWORD ADMIN_PASSWORD; do
-    reject_placeholder "$k"
-done
+# DB_PROVISION=auto 时 DB_PASSWORD 允许仍是占位值（下方会重新生成并写回），因此不在此拦截
+if [ "${DB_PROVISION:-manual}" = "auto" ]; then
+    reject_placeholder ADMIN_PASSWORD
+else
+    for k in DB_PASSWORD ADMIN_PASSWORD; do
+        reject_placeholder "$k"
+    done
+fi
 
 # 库名/用户名只在「与 PROJECT_NAME 不匹配」时才算占位值残留：
 # 项目恰好叫 myapp 时，myapp_db / myapp_user 正是正确值，不能误判

@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v2.6** |
+| 版本 | **v2.7** |
 | 生效日期 | 2026-09-29 |
 | 适用范围 | 在互联网侧开发、需无缝迁移至内网 Linux（x86_64）服务器运行的 B/S 系统 |
 | 目标场景 | 几人到几十人小团队；**多个项目共用一台服务器** |
@@ -58,7 +58,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 ```
 
 **十条红线（AI 最容易踩的）**：无 CDN/外链 · 无 `ports:` · 不自建数据库容器 · 基础镜像不用 `latest` · 部署期不装依赖 · 不硬编码口令 · 除 `/health` 外必须鉴权 · 必须实现 `/api/v1/health` · `mount_frontend()` 最后调用 · 交付说明不得与规范冲突。
-（完整 16 条见 [`templates/AGENTS.md`](templates/AGENTS.md)；15 项验收要点见 [§6.3](docs/06-交付与验收.md)。）
+（完整 17 条见 [`templates/AGENTS.md`](templates/AGENTS.md)；15 项验收要点见 [§6.3](docs/06-交付与验收.md)。）
 
 ---
 
@@ -94,6 +94,7 @@ cd /home/docker/<项目名> && bash tools/verify.sh
 
 | 版本 | 变化 |
 |---|---|
+| **v2.7** | **修掉 v2.6 自己引入的 5 个 bug + 吸收 5 条"假 PASS"根因**：① `verify.sh` 的 `DRILL=0` 原先在参数解析之后，`--drill` 是**死开关**（已移到循环之前）；② 演练判据由"快照数量增加"改为"**最新快照变化**"（`--keep 5` 稳态下数量不变，原判据必然假 FAIL）；③ `init.sh` 的 `DB_PROVISION=auto` 原先因 `require_env`/`reject_placeholder` 排在前面而**永远走不到随机生成口令的分支**（已改成条件校验）；④ `verify.sh` 缺 `SITE_DOMAIN` 由 `warn` 改为**判 FAIL**（与 init.sh 口径一致）；⑤ 验收第 4 项**校验响应体 `project` 字段**（`S8` 同步新增该字段强制）、第 15 项**校验解析到本机地址**（原"有输出即 PASS"会放过 198.18.0.54 与合成 AAAA）、第 9 项新增**可执行检查**（在镜像内扫 `/frontend` 外域引用）；⑥ `AGENTS.md` 吸收 S7/S8/S9（红线 8/13 改写 + 新增红线 17：启动期退出、运行期禁止退出）。 |
 | **v2.6** | **修掉模板自身的工程性倒退与流程漏项**：`.gitignore` 不再排除 `frontend/src`、`package.json`、`package-lock.json`（源码必须入库，否则 clone 后无法重建镜像）；§6.1 打包命令补 `.gitignore`、把 `frontend/dist` 改为整个 `frontend`（交付包必须含前端源码供复核）；§4.3 新增**多项目 conf.d 机制与投放规则**（加载顺序、`default_server` 唯一性、跨项目重名只能靠台账、投放后自检三件事）与目录示例；§4.2 补"开发与运维同一人兼任"的例外流程（先备份 → `nginx -t` → `reload` → 不改别人的 conf）；验收第 12 项**脚本化**（`tools/verify.sh --drill` 真跑一次同镜像升级，覆盖备份/重建/健康校验）；`preflight.sh` 把"刻意保留的占位口令"由 `WARN` 改为 **`NOTE`**（不计入 WARN，避免被当噪声），并在 §3.1 写明这是预期。 |
 | **v2.5** | **探活与启动语义定量化 + 参考实现固化**：新增 S7（探活必须有硬预算且 ≤ ½ × `healthcheck.timeout`；不截断会让一次正常升级被**误回滚**）、S8（`/api/v1/health` **永远 200** + `database` 字段表达依赖状态；就绪语义另开 `/api/v1/ready`）、S9（`start_period` 必须 ≥ 迁移重试上限，模板由 20s 调至 **60s**）；新增"**启动期库不可达 → 有限重试后退出；运行期库掉线 → 禁止退出**"强制条款与运维误判提示；把两个**已验证的参考实现**固化为模板（`health.py` 2.5s 预算、`migrate.py` 启动前滚 + 三方言，以及 `deploy/migrations/` 示例与三条硬规则）；`.env` 新增 `DB_PROVISION`（`manual`/`auto`）与 `DB_ROOT_PASSWORD_FILE`，`init.sh` 支持**自动建库建号**并把随机口令写回 `.env`；`deploy/init-db.*.sql` 的示例命令改为 **defaults-file / .pgpass** 传凭证（原示例把 root 口令写进命令行，`ps` 可读）。 |
 | **v2.4** | **把真实部署踩到的问题回灌进规范**（参考 Kali VM 上的 snake）：验收第 2 项改以 `HostConfig.PortBindings` 为判据（原按 `docker ps` 的 `PORTS` 列判，与模板 `Dockerfile` 的 `EXPOSE 80` 自相矛盾，**任何合规部署都必然 FAIL**）；`init.sh` 的宿主 :80 判定改为**与容器名无关**（有容器发布 :80 且在 `gateway-network` 上），新增 `GATEWAY_CONTAINER` / `GATEWAY_PROCESS`；§2.2 明确「基准值必须运行时探测」与「网桥不持有端口 / `EXPOSE` ≠ `ports:`」；域名键统一为 **`SITE_DOMAIN`** 且**未配置直接报错**（不再静默回退 `<项目名>.lan`，避免假 PASS）；红线 7 与 §4.6 给出**可满足**的鉴权口径（认证入口须逐条枚举、禁止通配）；`.env` 值约束由「允许集」改为**禁止集**（`/` 等恢复正常，`ALERT_WEBHOOK` 填 URL 不再自相矛盾）；新增**跨方言 DDL 取舍表**与**迁移三条硬规则**；`.dockerignore` 不再排除 `deploy/`，`Dockerfile` 增加 `COPY deploy/migrations /app/migrations`。 |

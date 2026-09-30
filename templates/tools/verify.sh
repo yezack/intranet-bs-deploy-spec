@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.6 §6.3
+# 现场验收脚本 —— 内网 B/S 架构开发规范 v2.7 §6.3
 #
 # 用法： cd /home/docker/<项目名> && bash tools/verify.sh [--drill] [--help]
 #   读同目录的 .env，逐项检查 §6.3 的 15 项验收要点，输出 PASS / WARN / FAIL。
@@ -24,16 +24,16 @@ usage() {
     exit 0
 }
 
+DRILL=0     # 【必须在参数解析之前】初始化：v2.6 把它放在参数循环之后，`--drill` 会被这行覆盖成死开关
 for a in "$@"; do
     case "$a" in
         --drill)   DRILL=1; shift ;;
         --help|-h) usage ;;
-       *) echo "未知参数：$a（用 --help 查看用法）" >&2; exit 1 ;;
+        *) echo "未知参数：$a（用 --help 查看用法）" >&2; exit 1 ;;
     esac
 done
 
 n_pass=0; n_warn=0; n_fail=0
-DRILL=0
 ok()   { n_pass=$((n_pass + 1)); printf '  [PASS] %s\n' "$*"; }
 bad()  { n_fail=$((n_fail + 1)); printf '  [FAIL] %s\n' "$*"; }
 warn() { n_warn=$((n_warn + 1)); printf '  [WARN] %s\n' "$*"; }
@@ -55,10 +55,14 @@ PROJECT_NAME="${PROJECT_NAME:-}"
 [ -n "$PROJECT_NAME" ] || { echo "错误：.env 中缺少 PROJECT_NAME" >&2; exit 1; }
 IMAGE="${PROJECT_NAME}-app:latest"
 CONTAINER="${PROJECT_NAME}-app"
-# 对外域名来自 .env 的 SITE_DOMAIN（开发阶段确认、运维分配），不再假定 <项目名>.lan
+# 对外域名来自 .env 的 SITE_DOMAIN（开发阶段确认、运维分配），不再假定 <项目名>.lan。
+# 【与 init.sh 同口径】未配置时**不允许静默继续**：直接判 FAIL，并跳过依赖域名的检查项。
+# 否则第 4/5 项会拿空 Host 头去请求，给出"看起来通过"的错误结论（规范 §4.2 / §6.3）。
 DOMAIN="${SITE_DOMAIN:-}"
+DOMAIN_OK=1
 if [ -z "$DOMAIN" ]; then
-    warn "SITE_DOMAIN 未配置：第 4-5/14-15 项无法用正确的 Host 头访问网关（见 §4.2）"
+    DOMAIN_OK=0
+    bad "SITE_DOMAIN 未配置：验收第 4/5/15 项无法判定（init.sh 会直接报错，见 §4.2）"
 fi
 
 if docker info >/dev/null 2>&1; then
@@ -104,13 +108,30 @@ if [ "$health" = "healthy" ]; then ok "healthy"; else bad "健康状态 = ${heal
 
 # ---------- 4 / 5 ----------
 sec "4-5. 网关与前端可达（经 127.0.0.1 + Host 头）"
-if command -v curl >/dev/null 2>&1; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "http://127.0.0.1/api/v1/health" || true)"
-    [ "$code" = "200" ] && ok "网关 /api/v1/health → 200" || bad "网关 /api/v1/health → ${code:-无响应}"
-    code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "http://127.0.0.1/" || true)"
-    [ "$code" = "200" ] && ok "前端 / → 200" || bad "前端 / → ${code:-无响应}"
-else
+# 只判 HTTP 200 会**假 PASS**：Host 被路由到别的项目同样返回 200。
+# 因此第 4 项必须校验响应体里的项目身份（后端 health 必须回传 project 字段，见 §3.5 S8）。
+if ! command -v curl >/dev/null 2>&1; then
     warn "无 curl，跳过 4-5"
+elif [ "$DOMAIN_OK" != 1 ]; then
+    info "跳过 4-5：SITE_DOMAIN 未配置（已在上面判 FAIL）"
+else
+    body="$(curl -s -H "Host: $DOMAIN" "http://127.0.0.1/api/v1/health" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "http://127.0.0.1/api/v1/health" || true)"
+    if [ "$code" != "200" ]; then
+        bad "网关 /api/v1/health → ${code:-无响应}（期望 200）"
+    elif printf '%s' "$body" | grep -q "\"project\":\"${PROJECT_NAME}\""; then
+        ok "网关 /api/v1/health → 200，且响应体 project=${PROJECT_NAME}（确认打到本项目）"
+    else
+        bad "网关 /api/v1/health → 200，但响应体里没有 project=${PROJECT_NAME}：Host 可能被路由到别的项目（响应体前 120 字节：$(printf '%s' "$body" | head -c 120)）"
+    fi
+    # 第 5 项：静态可达（项目身份已由第 4 项确认），这里只要求返回 HTML
+    body="$(curl -s -H "Host: $DOMAIN" "http://127.0.0.1/" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "http://127.0.0.1/" || true)"
+    if [ "$code" = "200" ] && printf '%s' "$body" | grep -qi '<html'; then
+        ok "前端 / → 200 且返回 HTML"
+    else
+        bad "前端 / → ${code:-无响应}，或响应体不像 HTML（前 80 字节：$(printf '%s' "$body" | head -c 80)）"
+    fi
 fi
 
 # ---------- 6 ----------
@@ -158,7 +179,15 @@ fi
 
 # ---------- 9 ----------
 sec "9. 离线自包含"
-info "前端产物外域引用由构建机的 tools/preflight.sh 第 7 组负责；断网启动请在首次部署时演练"
+# 运行期零公网依赖：对**已经构建进镜像的前端产物**再验一次（镜像才是最终交付物；
+# 构建机的 tools/preflight.sh 第 7 组只管构建目录，两者判据一致）。
+ext="$("${DOCKER[@]}" run --rm --entrypoint sh "$IMAGE" -c "grep -rIlE '(src|href|url|import).{0,20}https?://' /frontend 2>/dev/null" || true)"
+if [ -z "$ext" ]; then
+    ok "镜像内 /frontend 未发现外域资源引用"
+else
+    bad "镜像内 /frontend 存在外域资源引用（断网会失效）：$(printf '%s' "$ext" | head -n 3 | tr '\n' ' ')"
+fi
+info "断网演练（无法自动判定）：在测试机断开外网后重启容器，确认服务正常且日志无外网请求超时"
 
 # ---------- 10 ----------
 sec "10. 日志输出"
@@ -184,15 +213,21 @@ done
 if [ "$DRILL" = 1 ]; then
     # 升级演练：同镜像重放（--allow-same-image），覆盖 备份 → 重建 → 健康校验 全路径。
     info "开始升级演练：./update.sh --allow-same-image（会重建容器）"
-    before="$(ls -1d backups/*/ 2>/dev/null | wc -l | tr -d ' ')"
+    # 判据用「最新快照是否变了」，不能用「数量是否增加」：
+    # update.sh 默认 --keep 5，稳态机器上新快照会顶掉最旧的，总数不变（用数量判会永久假 FAIL）。
+    before_newest="$(ls -1d backups/*/ 2>/dev/null | sort | tail -n1)"
+    marker="$(mktemp)"      # 时间戳兜底：防同一秒内新旧目录名相同
+    sleep 1
     if ./update.sh --allow-same-image >/tmp/verify-drill.log 2>&1; then
-        after="$(ls -1d backups/*/ 2>/dev/null | wc -l | tr -d ' ')"
-        if [ "$after" -gt "$before" ]; then
-            ok "升级演练通过（退出码 0），且新增了备份快照（$before → $after）"
+        after_newest="$(ls -1d backups/*/ 2>/dev/null | sort | tail -n1)"
+        if [ -n "$after_newest" ] && { [ "$after_newest" != "$before_newest" ] || [ "$after_newest" -nt "$marker" ]; }; then
+            ok "升级演练通过（退出码 0），并产生了新备份快照：${before_newest:-<无>} → $after_newest"
         else
-            bad "升级演练退出码 0，但 backups/ 没有新增快照 —— update.sh 的备份步骤可能已失效"
+            bad "升级演练退出码 0，但 backups/ 没有产生新快照（最新仍是 ${after_newest:-<无>}）—— update.sh 的备份步骤可能已失效"
         fi
+        rm -f "$marker"
     else
+        rm -f "$marker"
         bad "升级演练失败（日志 /tmp/verify-drill.log 末尾）：$(tail -n 3 /tmp/verify-drill.log 2>/dev/null | tr '\n' ' ')"
     fi
 else
@@ -222,12 +257,32 @@ fi
 
 # ---------- 15 ----------
 sec "15. 域名解析"
-if [ -z "$DOMAIN" ]; then
-    warn "SITE_DOMAIN 未配置，跳过域名解析检查（见 §4.2）"
-elif command -v getent >/dev/null 2>&1 && getent hosts "$DOMAIN" >/dev/null 2>&1; then
-    ok "$DOMAIN 可解析：$(getent hosts "$DOMAIN" | head -n1)"
+# 只判「有输出」会**假 PASS**：解析到 198.18.0.54（RFC2544 保留段）或合成 AAAA 都算"有输出"。
+# 正确判据：解析到**本机地址**（本项目就部署在这台 VM 上，见 §2.1/§4.3）。
+if [ "$DOMAIN_OK" != 1 ]; then
+    info "跳过 15：SITE_DOMAIN 未配置（已在上面判 FAIL）"
+elif ! command -v getent >/dev/null 2>&1; then
+    warn "无 getent，跳过域名解析检查"
 else
-    warn "$DOMAIN 在本机解析不到；多人使用必须由运维在内网 DNS 加 A 记录；单机模拟验证可在 /etc/hosts 写「<虚拟机 IP>  $DOMAIN」（见 §4.3）"
+    ips="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    local_ips="$( { hostname -I 2>/dev/null; ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1; } | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    if [ -z "$ips" ]; then
+        if getent ahosts "$DOMAIN" >/dev/null 2>&1; then
+            bad "$DOMAIN 只解析到非 IPv4 地址（可能是合成 AAAA）：$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+        else
+            bad "$DOMAIN 在本机解析不到；多人使用必须由运维在内网 DNS 加 A 记录；单机模拟可在 /etc/hosts 写「<虚拟机 IP>  $DOMAIN」（见 §4.3）"
+        fi
+    else
+        hit=""
+        for ip in $ips; do
+            case " $local_ips " in *" $ip "*) hit="$ip"; break ;; esac
+        done
+        if [ -n "$hit" ]; then
+            ok "$DOMAIN 解析到本机地址 $hit（本机地址：$local_ips）"
+        else
+            bad "$DOMAIN 解析到 $ips，但都不是本机地址（本机：${local_ips:-未知}）——请求会打到别处（见 §4.3）"
+        fi
+    fi
 fi
 
 # ---------- 汇总 ----------
