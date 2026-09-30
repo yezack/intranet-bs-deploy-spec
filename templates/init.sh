@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.7 §5.1
+# 依据：内网 B/S 架构开发规范 v2.8 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -326,9 +326,12 @@ case "${DB_PROVISION:-manual}" in
             tmp_cnf="$(mktemp)"; tmp_sql="$(mktemp)"
             chmod 600 "$tmp_cnf" "$tmp_sql"
             # 按 .env 声明渲染：库名/用户/口令以 DB_* 为准，避免"建了 A 库却连 B 库"
-            sed -e "s/myapp_db/${DB_DATABASE}/g" \
-                -e "s/myapp_user/${DB_USERNAME}/g" \
-                -e "s/CHANGE_ME_STRONG_PASSWORD/${DB_PASSWORD}/g" "$sql_file" > "$tmp_sql"
+            # 【哨兵渲染】SQL 文件里用的是 __DB_DATABASE__ / __DB_USERNAME__ / __DB_PASSWORD__，
+            # 而不是 myapp_db 这类"看起来像真值"的占位——后者一旦被人工替换（文件头曾要求这么做），
+            # sed 就不再匹配，结果是"建了 A 库、应用却连 B 库"。
+            sed -e "s|__DB_DATABASE__|${DB_DATABASE}|g" \
+                -e "s|__DB_USERNAME__|${DB_USERNAME}|g" \
+                -e "s|__DB_PASSWORD__|${DB_PASSWORD}|g" "$sql_file" > "$tmp_sql"
             "${DOCKER[@]}" cp "$tmp_sql" "${DB_HOST}:/tmp/init-db.sql" >/dev/null
             if [ "$DB_ENGINE" = "pgsql" ]; then
                 printf '*:*:*:postgres:%s\n' "$ROOT_PW" > "$tmp_cnf"
@@ -424,18 +427,25 @@ cat <<EOF
   1) 将交付包 deploy/gateway-site.conf 复制为 <项目名>.conf
      确认 server_name 为 ${SITE_DOMAIN}（必须逐字一致）
      站点指向 ${CONTAINER}:80（resolver + 变量，禁止 upstream 块，见规范 §4.2）
-  2) 运维执行：
-       sudo cp ${PROJECT_NAME}.conf /home/docker/nginx/conf.d/
-       sudo docker exec ${GATEWAY_NAME} nginx -t
+  2) 运维执行（conf.d 路径以规范 §2.2 基准为准；现场路径不同请与运维确认，不要照抄）：
+       sudo cp ${PROJECT_NAME}.conf <conf.d 路径>/
+       sudo docker exec ${GATEWAY_NAME} nginx -t           # 必须先通过，通过后再 reload
        sudo docker exec ${GATEWAY_NAME} nginx -s reload
-  3) 确认终端可解析 ${SITE_DOMAIN}（内网 DNS；单机验证可在 /etc/hosts 写「<虚拟机 IP>  ${SITE_DOMAIN}」）
+  3) 【必查】网关是否已有兜底站点 00-default.conf（返回 444）——没有它时，未知 Host 会命中本项目（串站，规范 §4.3）：
+       curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: no-such-host.invalid' http://127.0.0.1/
+       期望：非 200。若返回 200，请让运维把交付包的 deploy/gateway-default.conf 投放为 conf.d/00-default.conf。
+       注意：同一个 listen 只允许一个 default_server；nginx -t 报 "a duplicate default server" 时，
+             不要去删别人的 conf，先与运维确认保留哪一个。
+       开发与运维同一人兼任时，按规范 §4.2 的例外流程：先备份 conf.d → nginx -t → reload。
+  4) 确认终端可解析 ${SITE_DOMAIN}（内网 DNS；单机验证可在 /etc/hosts 写「<虚拟机 IP>  ${SITE_DOMAIN}」）
 
 验收命令：
 
   ${DOCKER_SHOW} compose ps
   ${DOCKER_SHOW} inspect --format '{{.State.Health.Status}}' ${CONTAINER}
-  curl -s -H 'Host: ${SITE_DOMAIN}' http://127.0.0.1/api/v1/health
+  curl -s -H 'Host: ${SITE_DOMAIN}' http://127.0.0.1/api/v1/health    # 响应体应含 "project":"${PROJECT_NAME}"
   curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: ${SITE_DOMAIN}' http://127.0.0.1/
+  curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: no-such-host.invalid' http://127.0.0.1/   # 期望非 200
 
 日常运维：
 

@@ -3,7 +3,7 @@
 if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复： sed -i "s/\\r$//" "%s"\n' "$0" "$0" >&2; exit 1; fi  # EOL guard
 
 #USAGE-BEGIN
-# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.7 §3.1 / §6.1
+# 交付前闸门（在【外部构建机】执行）—— 内网 B/S 架构开发规范 v2.8 §3.1 / §6.1
 #
 # 用法： bash tools/preflight.sh [--no-docker] [--help]
 #   --no-docker  跳过需要 docker 的检查（没有 docker 的机器也能跑基础检查）

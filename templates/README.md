@@ -1,6 +1,6 @@
 # 内网 B/S 交付模板使用说明
 
-配套《内网 B/S 架构开发规范 v2.7》。规范正文按章拆分在上一级 `docs/`，入口见上一级 [`readme.md`](../readme.md)。
+配套《内网 B/S 架构开发规范 v2.8》。规范正文按章拆分在上一级 `docs/`，入口见上一级 [`readme.md`](../readme.md)。
 
 **模板中的 `myapp` / `myapp-app` 等示例值需整体替换为你自己的 `<项目名>`。**
 
@@ -40,7 +40,7 @@
 
 - [ ] `.env` 中 `PROJECT_NAME`、`DB_*`、`SECRET_KEY`、`ADMIN_PASSWORD`（`APP_UID`/`APP_GID` 默认 1000，仅当宿主 uid 冲突时调整）
 - [ ] **`.env` 的 `SITE_DOMAIN`（对外域名，开发启动前向运维确认）**；`deploy/gateway-site.conf` 中与它逐字一致的 `server_name`，以及容器名（`<项目名>-app`）
-- [ ] `deploy/init-db.*.sql` 中库名、用户名、口令（与 `.env` 保持一致）
+- [ ] `deploy/init-db.*.sql` **不要手改**：里面的 `__DB_DATABASE__` / `__DB_USERNAME__` / `__DB_PASSWORD__` 是渲染哨兵，由 `init.sh`（`DB_PROVISION=auto`）或文件头给出的 `sed` 命令填入 `.env` 的值
 - [ ] 网关 `client_max_body_size`（上传上限）与 `proxy_read_timeout`（导出耗时）
 - [ ] 域名解析：多人使用必须由运维在**内网 DNS** 加记录；`hosts` 仅用于 1–2 台机器临时验证
 
