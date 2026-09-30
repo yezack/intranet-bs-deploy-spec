@@ -1,6 +1,6 @@
 # 内网 B/S 交付模板使用说明
 
-配套《内网 B/S 架构开发规范 v2.4》。规范正文按章拆分在上一级 `docs/`，入口见上一级 [`readme.md`](../readme.md)。
+配套《内网 B/S 架构开发规范 v2.5》。规范正文按章拆分在上一级 `docs/`，入口见上一级 [`readme.md`](../readme.md)。
 
 **模板中的 `myapp` / `myapp-app` 等示例值需整体替换为你自己的 `<项目名>`。**
 
@@ -12,6 +12,9 @@
 | `tools/preflight.sh` | 交付前闸门，必须全部 PASS | `<项目名>/tools/preflight.sh` |
 | `tools/verify.sh` | 现场验收（自动跑 §6.3 的 15 项） | `<项目名>/tools/verify.sh` |
 | `db.py` | 连接串唯一构造点（`DB_ENGINE` 开关，见 §3.6） | `<项目名>/backend/app/db.py` |
+| `health.py` | 探活参考实现（2.5s 硬预算、永远 200 + `database` 字段，见 §3.5 S7/S8） | `<项目名>/backend/app/routers/health.py` |
+| `migrate.py` | 迁移执行器参考实现（启动时前滚、三方言、重试上限 < `start_period`，见 §5.2） | `<项目名>/backend/app/migrate.py` |
+| `deploy/migrations/` | 迁移目录示例（`0001_init.sql` + 约定说明） | `<项目名>/deploy/migrations/` |
 | `.gitignore` | 版本库排除规则（必须含 `.env` / `.local/`） | `<项目名>/.gitignore` |
 | `Dockerfile` | 单容器镜像构建 | `<项目名>/Dockerfile` |
 | `docker-compose.yml` | 编排 | `<项目名>/docker-compose.yml` |

@@ -1,5 +1,5 @@
 # <项目名> —— 内网 B/S 编排（单容器架构）
-# 依据：内网 B/S 架构开发规范 v2.4 §3.2 / §3.3 / §3.5 / §4
+# 依据：内网 B/S 架构开发规范 v2.5 §3.2 / §3.3 / §3.5 / §4
 #
 # 合规要点（逐条对应规范条款）：
 #   无 ports: 映射            → 对外只经统一网关 nginx-gateway（§4.1 强制）
@@ -63,7 +63,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+     # start_period 必须 ≥ 应用最坏启动时间（规范 §3.5 S9）：
+     #   迁移重试 10×3s = 30s + 迁移执行 + 监听启动 → 取 60s。
+     # 调小它会让"库还没就绪但代码正常"的启动被判 unhealthy，进而被 update.sh 误回滚。
+     start_period: 60s
 
     # 最小权限；NET_BIND_SERVICE 供非 root 绑定 80
     # 若改为 root 运行，可删除 user 与 cap_drop / cap_add（见规范 §3.5）

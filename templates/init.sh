@@ -8,7 +8,7 @@ if grep -q $'\r' "$0"; then printf '[EOL] 错误：%s 含 CRLF 行尾。修复�
 
 #USAGE-BEGIN
 # <项目名> 首次部署脚本
-# 依据：内网 B/S 架构开发规范 v2.4 §5.1
+# 依据：内网 B/S 架构开发规范 v2.5 §5.1
 #
 # 用法： sudo ./init.sh [--tar <文件>] [--dry-run] [--help]
 #   --tar <文件>  指定镜像包；省略时取本目录下最新的 *.tar（按修改时间）
@@ -261,6 +261,81 @@ if [ "$DRY_RUN" = 0 ]; then
             || warn "调整属主为 $OWNER 失败，请手工检查权限"
     fi
 fi
+
+# ---------- 数据库供给（DB_PROVISION=auto 时自动建库建号）----------
+# 规范 §3.3/§5.1：库与账号正常由运维创建；同一人兼任时可开 auto 让脚本代劳。
+# 【强制】安全要求：root 口令**绝不进命令行**（`ps` / shell history / `docker inspect` 都会泄漏）——
+# 这里把凭证写成 600 的文件再 `docker cp` 进容器，用完即删。
+case "${DB_PROVISION:-manual}" in
+    manual) : ;;
+    auto)
+        log "== 数据库供给：DB_PROVISION=auto =="
+        case "$DB_ENGINE" in
+            mariadb) sql_file="deploy/init-db.mariadb.sql" ;;
+            pgsql)   sql_file="deploy/init-db.pgsql.sql" ;;
+            *) die "DB_PROVISION=auto 不支持 DB_ENGINE=$DB_ENGINE" ;;
+        esac
+        [ -f "$sql_file" ] || die "DB_PROVISION=auto 需要 $sql_file（随交付包提供）"
+
+        # 应用口令：缺失/占位/过短时随机生成并写回 .env（与 SECRET_KEY 同一套路）
+        if [ -z "${DB_PASSWORD:-}" ] || [ "${#DB_PASSWORD}" -lt 16 ] || printf '%s' "$DB_PASSWORD" | grep -q 'CHANGE_ME'; then
+            NEW_DB_PASSWORD="$(openssl rand -hex 16 2>/dev/null || od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+            if [ "$DRY_RUN" = 1 ]; then
+                log "[dry-run] 将随机生成 DB_PASSWORD 并写回 .env"
+            else
+                sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${NEW_DB_PASSWORD}|" .env
+                DB_PASSWORD="$NEW_DB_PASSWORD"
+                log "已随机生成 DB_PASSWORD（16 字节 hex）并写回 .env"
+            fi
+        fi
+
+        # root 口令：多来源探测（现场文件位置并不统一，不能硬编码单一路径）
+        ROOT_PW=""
+        if [ -n "${DB_ROOT_PASSWORD_FILE:-}" ] && [ -f "${DB_ROOT_PASSWORD_FILE}" ]; then
+            ROOT_PW="$(tr -d '\r\n' < "${DB_ROOT_PASSWORD_FILE}")"
+            log "root 口令来源：DB_ROOT_PASSWORD_FILE=${DB_ROOT_PASSWORD_FILE}"
+        elif [ -n "${DB_ROOT_PASSWORD:-}" ]; then
+            ROOT_PW="$DB_ROOT_PASSWORD"
+            log "root 口令来源：环境变量 DB_ROOT_PASSWORD"
+        else
+            for f in /home/docker/mariadb/docker-compose.yml /home/docker/mariadb/.env /home/docker/docker-compose.yml; do
+                [ -f "$f" ] || continue
+                ROOT_PW="$(grep -m1 -E 'MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD' "$f" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d ' ')"
+                [ -n "$ROOT_PW" ] && { log "root 口令来源：$f"; break; }
+            done
+        fi
+
+        if [ -z "$ROOT_PW" ]; then
+            warn "未能自动获取数据库 root 口令（可用 .env 的 DB_ROOT_PASSWORD_FILE 指定文件）。已跳过自动建库，请手工执行 ${sql_file}——执行方式见该文件头部注释（用 defaults-file 传凭证，不要把口令写进命令行）"
+        elif [ "$DRY_RUN" = 1 ]; then
+            log "[dry-run] 将渲染 ${sql_file} 并导入容器 ${DB_HOST} 执行（库 ${DB_DATABASE} / 用户 ${DB_USERNAME}）"
+        else
+            tmp_cnf="$(mktemp)"; tmp_sql="$(mktemp)"
+            chmod 600 "$tmp_cnf" "$tmp_sql"
+            # 按 .env 声明渲染：库名/用户/口令以 DB_* 为准，避免"建了 A 库却连 B 库"
+            sed -e "s/myapp_db/${DB_DATABASE}/g" \
+                -e "s/myapp_user/${DB_USERNAME}/g" \
+                -e "s/CHANGE_ME_STRONG_PASSWORD/${DB_PASSWORD}/g" "$sql_file" > "$tmp_sql"
+            "${DOCKER[@]}" cp "$tmp_sql" "${DB_HOST}:/tmp/init-db.sql" >/dev/null
+            if [ "$DB_ENGINE" = "pgsql" ]; then
+                printf '*:*:*:postgres:%s\n' "$ROOT_PW" > "$tmp_cnf"
+                chmod 600 "$tmp_cnf"
+                "${DOCKER[@]}" cp "$tmp_cnf" "${DB_HOST}:/tmp/.pgpass" >/dev/null
+                "${DOCKER[@]}" exec "$DB_HOST" sh -c 'chmod 600 /tmp/.pgpass; PGPASSFILE=/tmp/.pgpass psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/init-db.sql; rc=$?; rm -f /tmp/.pgpass /tmp/init-db.sql; exit $rc' \
+                    || die "自动建库失败（pgsql）：请检查 root 口令来源与 ${sql_file}，或改用 DB_PROVISION=manual 手工执行"
+            else
+                printf '[client]\nuser=root\npassword=%s\n' "$ROOT_PW" > "$tmp_cnf"
+                chmod 600 "$tmp_cnf"
+                "${DOCKER[@]}" cp "$tmp_cnf" "${DB_HOST}:/tmp/.my.cnf" >/dev/null
+                "${DOCKER[@]}" exec "$DB_HOST" sh -c 'mysql --defaults-extra-file=/tmp/.my.cnf < /tmp/init-db.sql; rc=$?; rm -f /tmp/.my.cnf /tmp/init-db.sql; exit $rc' \
+                    || die "自动建库失败（mariadb）：请检查 root 口令来源与 ${sql_file}，或改用 DB_PROVISION=manual 手工执行"
+            fi
+            rm -f "$tmp_cnf" "$tmp_sql"
+            log "数据库供给完成：${DB_DATABASE} / ${DB_USERNAME}（口令已写入 .env）"
+        fi
+        ;;
+    *) die "DB_PROVISION 只能是 manual 或 auto，当前为 ${DB_PROVISION}" ;;
+esac
 
 # ---------- 阶段 3：导入镜像 ----------
 log "== 阶段 3/6：导入离线镜像 =="
